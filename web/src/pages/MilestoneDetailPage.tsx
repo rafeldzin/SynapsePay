@@ -25,9 +25,14 @@ function MilestoneHeader({ m }: { m: MilestoneDetail }) {
   const criteria = acceptanceCriteria(m.acceptance_json);
   return (
     <div className="space-y-2">
-      <Link to="/" className="text-sm text-blue-700 hover:underline">
-        ← Semua milestone
-      </Link>
+      <div className="flex justify-between text-sm">
+        <Link to="/" className="text-blue-700 hover:underline">
+          ← Semua milestone
+        </Link>
+        <Link to={`/timeline?milestone=${encodeURIComponent(m.id)}`} className="text-blue-700 hover:underline">
+          Lihat timeline event →
+        </Link>
+      </div>
       <div className="flex flex-wrap items-baseline justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold">{m.title}</h1>

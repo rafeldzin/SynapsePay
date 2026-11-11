@@ -38,6 +38,7 @@ Lalu cocokkan `types.ts` dengan file hasil generate.
 | `src/api/milestones.ts` | Milestone, verify, pay, events, reset, pratinjau gate |
 | `src/api/payouts.ts` | Daftar payout dan sync status |
 | `src/lib/events.ts` | Membaca verdict dan gate terbaru dari event log |
+| `src/lib/eventSummary.ts` | Ringkasan per tipe event, deteksi "simulated", dan ekstraksi ID PayPal dari payload |
 | `src/pages/` | Satu file per layar |
 | `src/components/` | Layout, `ErrorBox`, `StatusBadge`, `GateChecklist`, `VerdictPanel`, `CopyableId`, `Card` |
 
@@ -61,5 +62,5 @@ Lalu cocokkan `types.ts` dengan file hasil generate.
 1. Daftar milestone dan Reset demo (pilih skenario `timeout`/`unclaimed`): **selesai**
 2. Halaman milestone (deliverable, verdict, gate, pay, status payout): **selesai**
 3. Ledger payout (semua percobaan payout, ID bisa disalin, Sync per baris): **selesai**
-4. Timeline event: belum
+4. Timeline event (gabungan event semua milestone, filter `?milestone=`, label "simulasi", ID PayPal bisa disalin, refresh 5 detik): **selesai**
 5. Halaman kasus: belum

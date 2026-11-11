@@ -1,5 +1,6 @@
 import { Route, Routes } from "react-router-dom";
 import Layout from "./components/Layout";
+import CasePage from "./pages/CasePage";
 import LedgerPage from "./pages/LedgerPage";
 import MilestoneDetailPage from "./pages/MilestoneDetailPage";
 import MilestoneListPage from "./pages/MilestoneListPage";
@@ -14,8 +15,7 @@ export default function App() {
         <Route path="milestones/:id" element={<MilestoneDetailPage />} />
         <Route path="ledger" element={<LedgerPage />} />
         <Route path="timeline" element={<TimelinePage />} />
-        {/* Layar 5 dibangun di tahap berikutnya. */}
-        <Route path="cases" element={<NotBuiltPage title="Kasus" stage={5} />} />
+        <Route path="cases" element={<CasePage />} />
         <Route path="*" element={<NotBuiltPage title="Halaman tidak ditemukan" />} />
       </Route>
     </Routes>

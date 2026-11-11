@@ -37,6 +37,8 @@ Lalu cocokkan `types.ts` dengan file hasil generate.
 | `src/api/types.ts` | Bentuk data backend |
 | `src/api/milestones.ts` | Milestone, verify, pay, events, reset, pratinjau gate |
 | `src/api/payouts.ts` | Daftar payout dan sync status |
+| `src/api/cases.ts` | Kasus, case-evidence, pesan kontraktor, aksi kasus, katalog aksi |
+| `src/api/aiRecommendation.ts` | Rekomendasi AI (sementara data dummy) |
 | `src/lib/events.ts` | Membaca verdict dan gate terbaru dari event log |
 | `src/lib/eventSummary.ts` | Ringkasan per tipe event, deteksi "simulated", dan ekstraksi ID PayPal dari payload |
 | `src/pages/` | Satu file per layar |
@@ -63,4 +65,13 @@ Lalu cocokkan `types.ts` dengan file hasil generate.
 2. Halaman milestone (deliverable, verdict, gate, pay, status payout): **selesai**
 3. Ledger payout (semua percobaan payout, ID bisa disalin, Sync per baris): **selesai**
 4. Timeline event (gabungan event semua milestone, filter `?milestone=`, label "simulasi", ID PayPal bisa disalin, refresh 5 detik): **selesai**
-5. Halaman kasus: belum
+5. Halaman kasus (inbox simulasi, bukti dan status PayPal live, risiko pengalihan, aksi dari `allowed_actions`, konfirmasi telepon, panel Rekomendasi AI): **selesai**. Panel AI masih **data dummy** (`src/api/aiRecommendation.ts`) sampai endpoint AI ada.
+
+## Catatan halaman kasus
+
+- Backend hanya mengirim aksi yang diizinkan. Aksi lain dari katalog (`ACTION_CATALOG` di `src/api/cases.ts`)
+  ditampilkan abu-abu dengan ringkasan syarat dari kebijakan backend; keputusan tetap dari `allowed_actions`.
+- Tidak ada tombol kirim ulang biasa, sengaja.
+- `GET /milestones/{id}/case-evidence` memanggil PayPal live dan bisa membuka kasus, jadi tidak di-refresh otomatis.
+  Pakai tombol "Baca ulang dari PayPal".
+- Aksi dijalankan untuk kasus OPEN terbaru milestone itu.

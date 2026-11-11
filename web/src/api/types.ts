@@ -117,6 +117,93 @@ export interface SyncResponse {
   payout: Payout;
 }
 
+// ---------------------------------------------------------------------------
+// Kasus / investigator
+// ---------------------------------------------------------------------------
+
+/** Baris tabel cases. GET /cases mengembalikan array ini. */
+export interface CaseRecord {
+  id: number;
+  milestone_id: string;
+  reason: string;
+  opened_at: string;
+  status: string;
+}
+
+/** POST /milestones/{id}/messages mengembalikan baris ini. */
+export interface InboundMessage {
+  id: number;
+  milestone_id: string;
+  sender: string | null;
+  body: string;
+  received_at: string;
+}
+
+export interface LivePayPalStatus {
+  payout_id: number;
+  attempt: number;
+  sender_batch_id: string;
+  payout_batch_id: string | null;
+  payout_item_id: string | null;
+  local_status: string;
+  live_item_status: string;
+  live_batch_status: string | null;
+}
+
+export interface AllowedAction {
+  action: string;
+  reason: string;
+}
+
+export interface EmailDistance {
+  distance: number;
+  contract_email?: string;
+  live_payout_email?: string;
+  message_email: string;
+}
+
+/** GET /milestones/{id}/case-evidence. Status live diambil dari PayPal saat dipanggil. */
+export interface CaseEvidence {
+  milestone_id: string;
+  contract_email: string;
+  milestone_amount: number;
+  payouts: Payout[];
+  live_paypal_statuses: LivePayPalStatus[];
+  events: EventRecord[];
+  inbound_messages: InboundMessage[];
+  diversion_risk: boolean;
+  requires_out_of_band_verification: boolean;
+  extracted_message_emails: string[];
+  email_edit_distances: Record<string, EmailDistance>;
+  cases: CaseRecord[];
+  /** Hanya aksi yang DIIZINKAN. Aksi lain tidak dikirim backend. */
+  allowed_actions: AllowedAction[];
+}
+
+export interface CaseActionRequest {
+  action: string;
+  human_approved: boolean;
+  new_email?: string;
+  new_email_verified?: boolean;
+}
+
+/** Bentuk respons berbeda per aksi; field yang umum dipakai UI didaftarkan di sini. */
+export interface CaseActionResponse {
+  success?: boolean;
+  action?: string;
+  case_id?: number;
+  status?: string;
+  error?: string;
+  detail?: unknown;
+  cancel_unavailable?: boolean;
+  reissue_failed?: boolean;
+  paypal_name?: string;
+  status_code?: number;
+  debug_id?: string;
+  new_email?: string;
+  [key: string]: unknown;
+}
+
 export type DemoScenario = "timeout" | "unclaimed";
 
 /** POST /demo/reset */

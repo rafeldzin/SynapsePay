@@ -1,6 +1,11 @@
 """
-Demo walkthrough script placeholder for SynapsePay contract verification and payment rail.
+Demo walkthrough script for SynapsePay contract verification and direct PayPal Payouts payment rail.
 """
+import os
+import sys
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 from app.models.schema import Milestone, Deliverable
 from app.verifier.interface import verify
 
@@ -12,6 +17,7 @@ def main():
         id="m-001",
         title="Implement OAuth authentication",
         amount=150.0,
+        contractor_email="dewi@example.com",
         acceptance="Deliver complete OAuth2 login and token exchange endpoints.",
     )
 

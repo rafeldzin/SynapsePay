@@ -28,3 +28,7 @@ htmlcov/
 .vscode/
 .idea/
 *.swp
+synapsepay.db
+*.db
+*.db-wal
+*.db-shm

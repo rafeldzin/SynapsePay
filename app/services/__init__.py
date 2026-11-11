@@ -1,17 +1,15 @@
 from app.services.paypal import (
     PayPalClient,
+    PayPalError,
     PayPalAPIError,
-    create_order,
-    authorize_order,
-    capture_authorization,
-    void_authorization,
+    DuplicateBatchError,
+    default_paypal_client,
 )
 
 __all__ = [
     "PayPalClient",
+    "PayPalError",
     "PayPalAPIError",
-    "create_order",
-    "authorize_order",
-    "capture_authorization",
-    "void_authorization",
+    "DuplicateBatchError",
+    "default_paypal_client",
 ]

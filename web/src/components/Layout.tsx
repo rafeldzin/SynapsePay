@@ -11,7 +11,7 @@ export default function Layout() {
   return (
     <div className="min-h-screen">
       <header className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-6 gap-y-2 px-6 py-3">
+        <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-6 gap-y-2 px-6 py-3">
           <div className="whitespace-nowrap">
             <span className="font-semibold">SynapsePay</span>
             <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-800">
@@ -34,7 +34,7 @@ export default function Layout() {
           </nav>
         </div>
       </header>
-      <main className="mx-auto max-w-6xl px-6 py-6">
+      <main className="mx-auto max-w-7xl px-6 py-6">
         <Outlet />
       </main>
     </div>

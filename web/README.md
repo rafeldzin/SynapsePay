@@ -60,6 +60,6 @@ Lalu cocokkan `types.ts` dengan file hasil generate.
 
 1. Daftar milestone dan Reset demo (pilih skenario `timeout`/`unclaimed`): **selesai**
 2. Halaman milestone (deliverable, verdict, gate, pay, status payout): **selesai**
-3. Ledger payout: belum
+3. Ledger payout (semua percobaan payout, ID bisa disalin, Sync per baris): **selesai**
 4. Timeline event: belum
 5. Halaman kasus: belum

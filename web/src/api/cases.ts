@@ -1,57 +1,38 @@
 import { api } from "./client";
-import type { CaseActionRequest, CaseActionResponse, CaseEvidence, CaseRecord, InboundMessage } from "./types";
+import type {
+  ActionCode,
+  Approval,
+  CaseDetail,
+  InvestigationReport,
+  MessageResponse,
+  ReconcileResponse,
+  RecheckResponse,
+} from "./types";
 
-export const getCases = () => api.get<CaseRecord[]>("/cases");
+const enc = encodeURIComponent;
 
-/** Memanggil PayPal live di backend, jadi bisa beberapa detik. Juga memicu aturan pembukaan kasus. */
-export const getCaseEvidence = (milestoneId: string) =>
-  api.get<CaseEvidence>(`/milestones/${encodeURIComponent(milestoneId)}/case-evidence`);
+/** GET /api/cases/{id}: kasus + laporan investigasi + event kasus. */
+export const getCase = (caseId: string) => api.get<CaseDetail>(`/cases/${enc(caseId)}`);
 
-/** Pesan kontraktor (simulasi). Backend mencatat MESSAGE_RECEIVED dan mengecek pembukaan kasus. */
-export const postMessage = (milestoneId: string, sender: string, body: string) =>
-  api.post<InboundMessage>(`/milestones/${encodeURIComponent(milestoneId)}/messages`, {
-    sender: sender.trim() || null,
-    body,
-  });
+/** POST /api/cases/{id}/investigate: AI investigator read-only, bisa sampai 45 detik. */
+export const investigateCase = (caseId: string) => api.post<InvestigationReport>(`/cases/${enc(caseId)}/investigate`);
 
-export const runCaseAction = (caseId: number, req: CaseActionRequest) =>
-  api.post<CaseActionResponse>(`/cases/${caseId}/actions`, req);
+/** POST /api/cases/{id}/actions/reconcile: gate RECONCILE membaca PayPal lagi, lalu ledger jadi PAID. */
+export const reconcileCase = (caseId: string, approval: Approval) =>
+  api.post<ReconcileResponse>(`/cases/${enc(caseId)}/actions/reconcile`, approval);
 
-/**
- * Katalog semua aksi yang dikenal backend (lihat execute_case_action di policy_gate.py).
- * Backend hanya mengirim aksi yang DIIZINKAN di allowed_actions; aksi lain ditampilkan abu-abu.
- * `condition` adalah ringkasan kebijakan backend untuk ditampilkan, BUKAN dipakai untuk memutuskan.
- * Sengaja tidak ada aksi "resend" biasa.
- */
-export const ACTION_CATALOG: { action: string; label: string; condition: string; movesMoney: boolean }[] = [
-  {
-    action: "mark_paid_no_resend",
-    label: "Tandai sudah dibayar (tanpa kirim ulang)",
-    condition: "Status item live di PayPal SUCCESS.",
-    movesMoney: false,
-  },
-  {
-    action: "cancel_and_reissue",
-    label: "Batalkan item dan terbitkan ulang ke email terverifikasi",
-    condition: "Item UNCLAIMED, batch SUCCESS, dan belum pernah gagal cancel.",
-    movesMoney: true,
-  },
-  {
-    action: "request_out_of_band_verification",
-    label: "Minta verifikasi di luar chat",
-    condition: "Ada risiko pengalihan: pesan menyebut email yang beda dengan kontrak.",
-    movesMoney: false,
-  },
-  {
-    action: "wait_and_resync",
-    label: "Tunggu lalu sinkron ulang",
-    condition: "Payout masih RESERVED, PENDING, atau PROCESSING.",
-    movesMoney: false,
-  },
-  {
-    action: "escalate_manual",
-    label: "Eskalasi ke petugas manusia",
-    condition: "Risiko pengalihan, cancel pernah gagal, atau item BLOCKED/ONHOLD.",
-    movesMoney: false,
-  },
-];
+/** POST /api/cases/{id}/actions/recheck: sync ulang payout kasus (read-only). */
+export const recheckCase = (caseId: string) => api.post<RecheckResponse>(`/cases/${enc(caseId)}/actions/recheck`);
+
+/** POST /api/messages: pesan kontraktor (simulasi). Aturan D1 bisa membuka kasus. */
+export const postMessage = (contractId: string, fromEmail: string, body: string) =>
+  api.post<MessageResponse>("/messages", { contract_id: contractId, from_email: fromEmail, body });
+
+/** Label aksi (kode PRD 7). Kode aslinya selalu ikut ditampilkan. */
+export const ACTION_LABELS: Record<ActionCode, string> = {
+  WAIT_AND_RECHECK: "Tunggu lalu cek ulang",
+  CANCEL_UNCLAIMED_AND_REISSUE: "Batalkan item unclaimed lalu terbitkan ulang",
+  RECONCILE_MARK_PAID: "Rekonsiliasi: tandai sudah dibayar",
+  RETRY_SAME_BATCH_ID: "Retry dengan sender_batch_id yang sama",
+  ESCALATE_TO_HUMAN: "Eskalasi ke manusia",
+};

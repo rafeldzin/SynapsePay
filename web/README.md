@@ -1,27 +1,30 @@
-# SynapsePay Web (dashboard)
+# SynapsePay Web (dashboard, eksperimen)
 
-Dashboard internal untuk membayar kontraktor per milestone lewat PayPal Payouts (sandbox).
+Dashboard React untuk membayar kontraktor per milestone lewat PayPal Payouts (sandbox).
 Frontend hanya memanggil backend FastAPI. Status, ID, dan nominal semuanya berasal dari API.
+
+> **Bukan UI yang dinilai.** UI resmi adalah `app/static/` (satu halaman HTML + vanilla JS, PRD 4.1).
+> PRD 3.2 menaruh "frontend build step terpisah" di luar scope, jadi `web/` hanya eksperimen di branch ini.
 
 ## Menjalankan
 
 ```bash
-# 1. Jalankan backend FastAPI di http://localhost:8000 (dari root repo, branch backend)
-uvicorn app.main:app --reload --port 8000
+# 1. Backend FastAPI di http://127.0.0.1:8000 (dari root repo, .env sudah diisi)
+py -m uvicorn app.main:app --reload     # Linux/macOS: uvicorn app.main:app --reload
 
-# 2. Jalankan frontend
+# 2. Frontend
 cd web
 npm install
 npm run dev        # http://localhost:5173
 ```
 
-Semua request ke `/api/*` diteruskan Vite ke `http://localhost:8000`.
-Ganti target dengan env `BACKEND_URL=http://host:port npm run dev`.
+Semua request ke `/api/*` diteruskan Vite apa adanya ke `http://127.0.0.1:8000` (route backend sendiri
+berawalan `/api`, PRD 12). Ganti target dengan env `BACKEND_URL=http://host:port npm run dev`.
 
 ## Sinkron dengan backend
 
-`src/api/types.ts` diselaraskan dengan branch backend `feat/rafel-paypal-engine` (commit 7942aa7).
-Kalau backend berubah:
+`src/api/types.ts` disalin dari `app/contracts.py` (PRD 7, kontrak beku), kolom `app/schema.sql`, dan
+bentuk respons `app/main.py`. Kalau backend berubah:
 
 ```bash
 npm run gen:api    # membuat src/api/openapi.d.ts dari /openapi.json
@@ -29,49 +32,51 @@ npm run gen:api    # membuat src/api/openapi.d.ts dari /openapi.json
 
 Lalu cocokkan `types.ts` dengan file hasil generate.
 
+## Route yang dipakai (15 route backend)
+
+| Route | Dipakai di |
+|---|---|
+| `GET /api/state` | Semua layar (`useAppState`, polling 2 detik, sama dengan `app/static/app.js`) |
+| `GET /api/health` | - (hanya dicek saat uji) |
+| `POST /api/demo/reset` | Daftar milestone: Reset demo (B) / (A) |
+| `POST /api/demo/arm-fault` | `armFault()` tersedia; skenario B sudah memasang `timeout_after_send` saat reset |
+| `POST /api/milestones/{id}/deliverable` | Fixture seed (JSON) atau unggah CSV + laporan (multipart) |
+| `GET /api/milestones/{id}/gate` | `getGatePreview()`; layar memakai `gate_preview` dari `/api/state` |
+| `POST /api/milestones/{id}/pay` | Approve & pay |
+| `POST /api/payouts/{id}/retry` | Retry (kunci sama), di halaman milestone dan kasus |
+| `POST /api/payouts/{id}/sync`, `POST /api/sync` | Sync per payout dan Sync semua (read-only) |
+| `POST /api/messages` | Inbox kontraktor (simulasi) |
+| `GET /api/cases/{id}` | `getCase()`; layar memakai `cases` dari `/api/state` |
+| `POST /api/cases/{id}/investigate` | Run AI investigator |
+| `POST /api/cases/{id}/actions/reconcile` | Approve reconcile (mark paid) |
+| `POST /api/cases/{id}/actions/recheck` | Recheck (read-only) |
+
+Cancel dan reissue belum punya route di backend (paket A5), jadi ditampilkan sebagai "belum tersedia".
+
 ## Struktur
 
 | Path | Isi |
 |---|---|
-| `src/api/client.ts` | Pembungkus fetch dan `ApiError` (nama error, `debug_id`, status HTTP) |
+| `src/api/client.ts` | Pembungkus fetch dan `ApiError` (nama error, status HTTP, `GateResult` untuk HTTP 409) |
 | `src/api/types.ts` | Bentuk data backend |
-| `src/api/milestones.ts` | Milestone, verify, pay, events, reset, pratinjau gate |
-| `src/api/payouts.ts` | Daftar payout dan sync status |
-| `src/api/cases.ts` | Kasus, case-evidence, pesan kontraktor, aksi kasus, katalog aksi |
-| `src/api/aiRecommendation.ts` | Rekomendasi AI (sementara data dummy) |
-| `src/lib/events.ts` | Membaca verdict dan gate terbaru dari event log |
-| `src/lib/eventSummary.ts` | Ringkasan per tipe event, deteksi "simulated", dan ekstraksi ID PayPal dari payload |
+| `src/api/milestones.ts` | State, deliverable, pratinjau gate, pay, reset, arm-fault |
+| `src/api/payouts.ts` | Retry, sync |
+| `src/api/cases.ts` | Investigate, reconcile, recheck, pesan kontraktor, label aksi |
+| `src/lib/state.tsx` | `useAppState`, nama operator (`approved_by`), konfirmasi persetujuan |
+| `src/lib/eventSummary.ts` | Ringkasan per tipe event (PRD 5.1), label "simulasi", ID PayPal |
 | `src/pages/` | Satu file per layar |
 | `src/components/` | Layout, `ErrorBox`, `StatusBadge`, `GateChecklist`, `VerdictPanel`, `CopyableId`, `Card` |
 
-## Cara kerja halaman milestone
+## Alur skenario B
 
-- **Verdict** diambil dari event `VERDICT_RECORDED` terbaru, jadi tetap tampil setelah reload.
-- **Checklist gate** dirender apa adanya dari backend, tidak dihitung ulang di frontend:
-  - Kalau backend punya `GET /milestones/{id}/gate`, checklist itu dipakai sebagai pratinjau. Tombol
-    Approve & pay nonaktif selama ada cek merah. Cek `human_approved` ditampilkan "menunggu klik",
-    karena klik tombol itulah persetujuannya.
-  - Kalau endpoint itu belum ada, UI menampilkan evaluasi gate terakhir (event `GATE_EVALUATED`), dan
-    gate backend memutuskan saat tombol diklik.
-- **Approve & pay** meminta konfirmasi, terkunci selama request berjalan, dan tidak pernah diulang otomatis.
-- **Error PayPal**: backend saat ini membalas HTTP 500 teks polos. UI lalu membaca event `PAYOUT_ERROR`
-  terbaru untuk menampilkan nama error dan `debug_id`.
-- **Polling**: selama status item `PENDING`/`PROCESSING`, UI memanggil `POST /payouts/{id}/sync` setiap
-  4 detik, maksimal 15 kali.
+1. Daftar milestone: **Reset demo (B)**.
+2. Milestone `m1`: klik fixture `m1_pass`, verdict `PASS` dengan fakta yang dikutip.
+3. **Approve & pay**: gate `PAY` lolos, fault simulasi membuang respons PayPal, ledger `UNKNOWN`.
+4. **Retry (kunci sama)**: PayPal menemukan batch asli, backend membuka kasus `D4`. Ledger tetap `UNKNOWN`.
+5. Kasus: **Run AI investigator**: rekomendasi `RECONCILE_MARK_PAID`, hipotesis, bukti, dan draf balasan.
+   Rekomendasi itu baru muncul setelah item PayPal `SUCCESS` (sandbox biasanya beberapa detik); sebelum itu
+   investigator menyarankan `WAIT_AND_RECHECK` dan gate `RECONCILE` menolak dengan cek `RC-3`.
+6. **Approve reconcile (mark paid)**: gate membaca PayPal lagi, payout dan milestone `PAID`, kasus `RESOLVED`.
 
-## Status layar
-
-1. Daftar milestone dan Reset demo (pilih skenario `timeout`/`unclaimed`): **selesai**
-2. Halaman milestone (deliverable, verdict, gate, pay, status payout): **selesai**
-3. Ledger payout (semua percobaan payout, ID bisa disalin, Sync per baris): **selesai**
-4. Timeline event (gabungan event semua milestone, filter `?milestone=`, label "simulasi", ID PayPal bisa disalin, refresh 5 detik): **selesai**
-5. Halaman kasus (inbox simulasi, bukti dan status PayPal live, risiko pengalihan, aksi dari `allowed_actions`, konfirmasi telepon, panel Rekomendasi AI): **selesai**. Panel AI masih **data dummy** (`src/api/aiRecommendation.ts`) sampai endpoint AI ada.
-
-## Catatan halaman kasus
-
-- Backend hanya mengirim aksi yang diizinkan. Aksi lain dari katalog (`ACTION_CATALOG` di `src/api/cases.ts`)
-  ditampilkan abu-abu dengan ringkasan syarat dari kebijakan backend; keputusan tetap dari `allowed_actions`.
-- Tidak ada tombol kirim ulang biasa, sengaja.
-- `GET /milestones/{id}/case-evidence` memanggil PayPal live dan bisa membuka kasus, jadi tidak di-refresh otomatis.
-  Pakai tombol "Baca ulang dari PayPal".
-- Aksi dijalankan untuk kasus OPEN terbaru milestone itu.
+Setiap aksi yang mengubah ledger meminta konfirmasi dan mengirim `{approved_by, confirm: true}` di request
+yang sama (INV-4). Penolakan gate (HTTP 409) menampilkan checklist lengkap dari backend.

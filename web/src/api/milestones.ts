@@ -1,50 +1,61 @@
-import { ApiError, api } from "./client";
+import { api } from "./client";
 import type {
-  DemoScenario,
-  EventRecord,
-  Milestone,
-  MilestoneDetail,
+  AppState,
+  Approval,
+  Fault,
+  GateResult,
   PayResponse,
-  PolicyGateResult,
   ResetResponse,
-  Verdict,
+  Scenario,
+  VerificationResult,
 } from "./types";
 
-export const getMilestones = () => api.get<Milestone[]>("/milestones");
+/** Kontraktor yang di-seed (sama dengan app/static/app.js), dipakai sebagai submitted_by. */
+export const CONTRACTOR = "dewi";
 
-export const getMilestone = (id: string) => api.get<MilestoneDetail>(`/milestones/${encodeURIComponent(id)}`);
+/** Fixture yang di-seed per milestone (fixtures/manifest.json). */
+export const FIXTURES: { name: string; milestoneId: string }[] = [
+  { name: "m1_pass", milestoneId: "m1" },
+  { name: "m2_fail_injected", milestoneId: "m2" },
+  { name: "m2_fail_clean", milestoneId: "m2" },
+  { name: "m2_good_injected", milestoneId: "m2" },
+];
 
-export const getMilestoneEvents = (id: string) =>
-  api.get<EventRecord[]>(`/milestones/${encodeURIComponent(id)}/events`);
+const enc = encodeURIComponent;
 
-/** POST /milestones/{id}/verify dengan isi deliverable sebagai teks. */
-export const verifyMilestone = (id: string, content: string) =>
-  api.post<Verdict>(`/milestones/${encodeURIComponent(id)}/verify`, { content });
+/** GET /api/state: satu snapshot berisi kontrak, milestone, payout, kasus, pesan, dan event. */
+export const getState = () => api.get<AppState>("/state");
 
-/**
- * POST /milestones/{id}/pay. Klik tombol adalah persetujuan manusia, jadi
- * human_approved selalu true di sini; gate backend tetap memutuskan.
- */
-export const payMilestone = (id: string, opts: { simulateLostResponse: boolean }) =>
-  api.post<PayResponse>(`/milestones/${encodeURIComponent(id)}/pay`, {
-    human_approved: true,
-    simulate_lost_response: opts.simulateLostResponse,
+/** POST /api/milestones/{id}/deliverable dengan fixture yang di-seed. */
+export const submitFixture = (milestoneId: string, fixture: string) =>
+  api.post<VerificationResult>(`/milestones/${enc(milestoneId)}/deliverable`, {
+    fixture,
+    submitted_by: CONTRACTOR,
   });
 
-export const resetDemo = (scenario: DemoScenario) => api.post<ResetResponse>("/demo/reset", { scenario });
+/** POST /api/milestones/{id}/deliverable sebagai multipart: CSV + laporan, masing-masing maks 5 MB. */
+export function uploadDeliverable(milestoneId: string, csv: File, report: File) {
+  const form = new FormData();
+  form.append("csv_file", csv);
+  form.append("report_file", report);
+  form.append("submitted_by", CONTRACTOR);
+  return api.post<VerificationResult>(`/milestones/${enc(milestoneId)}/deliverable`, form);
+}
+
+/** GET /api/milestones/{id}/gate: pratinjau gate PAY, tanpa event dan tanpa panggilan PayPal. */
+export const getGatePreview = (milestoneId: string) => api.get<GateResult>(`/milestones/${enc(milestoneId)}/gate`);
 
 /**
- * Pratinjau gate tanpa membayar: GET /milestones/{id}/gate.
- * Endpoint ini BELUM ADA di backend (diusulkan ke tim backend). Selama belum
- * ada, fungsi ini mengembalikan null dan UI memberi tahu bahwa gate baru
- * dievaluasi saat tombol diklik.
+ * POST /api/milestones/{id}/pay. Nominal yang diharapkan dikirim apa adanya dari backend;
+ * gate (PAY-x) yang memastikan nominal dan penerima berasal dari database (INV-6).
  */
-export async function getGatePreview(id: string): Promise<PolicyGateResult | null> {
-  try {
-    return await api.get<PolicyGateResult>(`/milestones/${encodeURIComponent(id)}/gate`);
-  } catch (error) {
-    // 404 dengan detail "Not Found" = route belum ada (bukan milestone tidak ditemukan).
-    if (error instanceof ApiError && error.status === 404 && error.message === "Not Found") return null;
-    throw error;
-  }
-}
+export const payMilestone = (milestoneId: string, expectedAmountCents: number, approval: Approval) =>
+  api.post<PayResponse>(`/milestones/${enc(milestoneId)}/pay`, {
+    ...approval,
+    expected_amount_cents: expectedAmountCents,
+  });
+
+export const resetDemo = (scenario: Scenario) => api.post<ResetResponse>("/demo/reset", { scenario });
+
+/** Memasang fault simulasi untuk create_payout berikutnya (skenario B sudah memasangnya saat reset). */
+export const armFault = (fault: Fault) => api.post<{ armed: Fault }>("/demo/arm-fault", { fault });

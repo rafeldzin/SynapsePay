@@ -1,214 +1,290 @@
 /**
- * Bentuk data dari backend FastAPI.
+ * Bentuk data dari backend FastAPI di `app/main.py` (PRD 7, 12).
  *
- * Diselaraskan dengan branch backend `feat/rafel-paypal-engine` (commit 7942aa7):
- * app/main.py, app/core/database.py, app/core/policy_gate.py. Kalau backend
- * berubah, jalankan `npm run gen:api` dan cocokkan dengan file ini.
+ * Disalin dari `app/contracts.py` (kontrak beku) dan dari kolom tabel di `app/schema.sql`.
+ * Semua nominal dalam sen (integer). Semua timestamp UTC ISO 8601, mis. "2026-11-12T15:48:09Z".
+ * Kalau backend berubah, jalankan `npm run gen:api` dan cocokkan dengan file ini.
  */
 
 export type VerdictValue = "PASS" | "FAIL" | "NEEDS_REVIEW";
+export type GateAction = "PAY" | "RETRY" | "CANCEL" | "REISSUE" | "RECONCILE";
+export type ActionCode =
+  | "WAIT_AND_RECHECK"
+  | "CANCEL_UNCLAIMED_AND_REISSUE"
+  | "RECONCILE_MARK_PAID"
+  | "RETRY_SAME_BATCH_ID"
+  | "ESCALATE_TO_HUMAN";
+export type HypothesisCode =
+  | "MISTYPED_RECIPIENT"
+  | "PROCESSING_DELAY"
+  | "ORIGINAL_SUCCEEDED_LEDGER_STALE"
+  | "PAYOUT_NEVER_CREATED"
+  | "RECIPIENT_CANNOT_RECEIVE"
+  | "OTHER";
+export type Scenario = "A" | "B";
+export type Fault = "timeout_after_send" | "timeout_before_send";
 
-export interface Contract {
-  id: string;
-  buyer_name: string | null;
-  contractor_name: string | null;
-  currency: string;
+export type MilestoneState = "AWAITING_DELIVERABLE" | "PASS" | "FAIL" | "NEEDS_REVIEW" | "PAYOUT_IN_FLIGHT" | "PAID";
+export type PayoutState = "CREATING" | "UNKNOWN" | "SENT" | "UNCLAIMED" | "PAID" | "RETURNED" | "FAILED";
+export type CaseState = "OPEN" | "INVESTIGATED" | "NEEDS_HUMAN" | "AWAITING_REISSUE" | "RESOLVED";
+export type TriggerRule = "D1" | "D2" | "D3" | "D4";
+
+// ---- verifikasi (PRD 7) ------------------------------------------------------
+
+export interface HardCheck {
+  fact_id: string;
+  op: "==" | "<=" | ">=";
+  value: number | string | boolean;
 }
 
-/** Baris tabel milestones. GET /milestones mengembalikan array ini (tanpa status). */
-export interface Milestone {
+export interface Criterion {
   id: string;
-  contract_id: string | null;
-  title: string;
-  amount: number;
-  /** String JSON, mis. {"criteria": ["...", "..."]}. */
-  acceptance_json: string | null;
-  contractor_email: string;
+  text: string;
+  hard_checks: HardCheck[];
 }
 
-/** GET /milestones/{id}: milestone plus kontraknya. */
-export interface MilestoneDetail extends Milestone {
-  contract: Contract | null;
+export interface Fact {
+  id: string;
+  value: number | string | boolean | string[];
+}
+
+export interface InjectionFinding {
+  source: "report" | "csv" | "model";
+  pattern_id: string;
+  excerpt: string;
+}
+
+export interface ContradictedClaim {
+  claim: string;
+  fact_id: string;
+  fact_value: number | string | boolean;
 }
 
 export interface CriterionVerdict {
-  criterion: string;
+  criterion_id: string;
   verdict: VerdictValue;
-  /** Backend mengirim satu string; UI menampilkannya sebagai satu chip. */
-  evidence: string | null;
+  rationale: string;
+  cited_fact_ids: string[];
+  downgraded_by: "hard_check" | "coverage_rule" | "llm_error" | null;
 }
 
-export interface Verdict {
+export interface VerificationResult {
   milestone_id: string;
-  verdict: VerdictValue;
-  reasons: string[];
-  injection_flag: boolean;
+  deliverable_sha256: string;
+  facts: Fact[];
   criteria: CriterionVerdict[];
+  overall: VerdictValue;
+  overall_capped_by: "injection_cap" | null;
+  injection_detected: boolean;
+  injection_findings: InjectionFinding[];
+  contradicted_claims: ContradictedClaim[];
+  note_to_contractor: string;
+  llm_used: boolean;
+  created_at: string;
 }
+
+// ---- gate (PRD 7, 10) --------------------------------------------------------
 
 export interface GateCheck {
+  /** mis. "PAY-4" */
+  id: string;
   name: string;
-  passed: boolean;
+  /** null = menunggu klik manusia (hanya di pratinjau). */
+  ok: boolean | null;
   detail: string;
 }
 
-export interface PolicyGateResult {
+export interface GateResult {
+  action: GateAction;
   allowed: boolean;
+  preview: boolean;
   checks: GateCheck[];
-  sender_batch_id: string | null;
-  reasons?: string[];
+  evaluated_at: string;
 }
 
-/** Baris tabel payouts. Status adalah status ITEM PayPal (atau RESERVED/FAILED lokal). */
+// ---- investigasi (PRD 7, 11) -------------------------------------------------
+
+export interface Evidence {
+  id: string;
+  tool: string;
+  source: "paypal" | "local";
+  summary: string;
+  data: Record<string, unknown>;
+  fetched_at: string;
+}
+
+export interface Hypothesis {
+  code: HypothesisCode;
+  rank: number;
+  supported: boolean;
+  rationale: string;
+  evidence_ids: string[];
+}
+
+export interface InvestigationReport {
+  case_id: string;
+  payout_id: string;
+  hypotheses: Hypothesis[];
+  recommended_action: ActionCode;
+  do_not_resend: boolean;
+  resend_risk: string;
+  diversion_risk: boolean;
+  requested_email: string | null;
+  required_verification: string | null;
+  evidence: Evidence[];
+  reply_draft: string;
+  steps_used: number;
+  mode: "tool_loop" | "prefetch";
+  downgraded_by: "action_not_in_list" | "no_paypal_citation" | "status_mismatch" | "llm_error" | "step_cap" | null;
+  created_at: string;
+}
+
+// ---- baris tabel seperti dikirim GET /api/state ------------------------------
+
+export interface Contract {
+  id: string;
+  buyer_name: string;
+  contractor_name: string;
+  payee_email: string;
+  payee_email_verified_at: string | null;
+  payee_email_verified_by: string | null;
+  currency: string;
+}
+
+export interface Milestone {
+  id: string;
+  seq: number;
+  title: string;
+  amount_cents: number;
+  state: MilestoneState;
+  verdict: VerdictValue | null;
+  override_reason: string | null;
+  override_by: string | null;
+  criteria: Criterion[] | null;
+  verification: VerificationResult | null;
+  /** Pratinjau gate PAY: cek manusia bernilai null, tidak ada event yang ditulis. */
+  gate_preview: GateResult;
+}
+
 export interface Payout {
-  id: number;
+  id: string;
   milestone_id: string;
   attempt: number;
   sender_batch_id: string;
+  recipient_email: string;
+  amount_cents: number;
+  currency: string;
+  state: PayoutState;
   payout_batch_id: string | null;
   payout_item_id: string | null;
-  receiver_email: string;
-  amount: number;
-  status: string;
+  batch_status: string | null;
+  item_status: string | null;
+  replaces_payout_id: string | null;
+  approved_by: string;
   created_at: string;
+  updated_at: string;
+  last_synced_at: string | null;
+}
+
+export interface CaseRecord {
+  id: string;
+  payout_id: string;
+  milestone_id: string;
+  trigger_rule: TriggerRule;
+  state: CaseState;
+  /** 0 atau 1 dari SQLite. */
+  diversion_risk: number;
+  requested_email: string | null;
+  recommended_action: ActionCode | null;
+  report: InvestigationReport | null;
+  resolution: string | null;
+  opened_at: string;
   updated_at: string;
 }
 
-/** Baris tabel events (append-only). `timestamp` dalam UTC tanpa zona waktu. */
+export interface CaseDetail extends CaseRecord {
+  events: EventRecord[];
+}
+
+export interface Message {
+  id: string;
+  contract_id: string;
+  from_email: string;
+  body: string;
+  created_at: string;
+}
+
+/** Baris tabel events (append-only, PRD 5.1). */
 export interface EventRecord {
   id: number;
-  milestone_id: string | null;
-  payout_id: number | null;
+  ts: string;
   type: string;
-  payload_json: string | null;
-  payload: unknown;
-  timestamp: string;
+  actor: string;
+  contract_id: string | null;
+  milestone_id: string | null;
+  payout_id: string | null;
+  case_id: string | null;
+  paypal_batch_id: string | null;
+  paypal_item_id: string | null;
+  payload: Record<string, unknown>;
 }
 
-/**
- * POST /milestones/{id}/pay.
- * - Ditolak gate: status "REJECTED_OR_IN_PROGRESS", success false, gate_result berisi checks.
- * - Berhasil: success true, status = status item PayPal, plus ID PayPal.
- * - Simulasi respons hilang / timeout: success false, status "RESERVED", reconcile_required true.
- * - Error PayPal: backend saat ini membalas HTTP 500 teks polos (lihat event PAYOUT_ERROR).
- */
+/** GET /api/state (PRD 12.1). */
+export interface AppState {
+  run_id: string | null;
+  scenario: Scenario | null;
+  paypal_mode: string;
+  llm_mode: string;
+  contract: Contract | null;
+  milestones: Milestone[];
+  payouts: Payout[];
+  cases: CaseRecord[];
+  messages: Message[];
+  events: EventRecord[];
+}
+
+// ---- body dan respons aksi ---------------------------------------------------
+
+/** Persetujuan manusia, dikirim di request yang sama dengan aksinya (INV-4). */
+export interface Approval {
+  approved_by: string;
+  confirm: boolean;
+}
+
+export interface ResetResponse {
+  run_id: string;
+  scenario: Scenario;
+}
+
 export interface PayResponse {
-  status: string;
-  success: boolean;
-  allowed?: boolean;
-  payout_id?: number;
-  sender_batch_id?: string;
-  payout_batch_id?: string | null;
-  payout_item_id?: string | null;
-  gate_result?: PolicyGateResult;
-  error?: string;
-  detail?: string;
-  reconcile_required?: boolean;
-  simulated_lost_response?: boolean;
-}
-
-/** POST /payouts/{id}/sync */
-export interface SyncResponse {
-  payout_id: number;
-  old_status: string;
-  new_status: string;
-  flagged: boolean;
-  flags: string[];
+  gate: GateResult;
   payout: Payout;
 }
 
-// ---------------------------------------------------------------------------
-// Kasus / investigator
-// ---------------------------------------------------------------------------
-
-/** Baris tabel cases. GET /cases mengembalikan array ini. */
-export interface CaseRecord {
-  id: number;
-  milestone_id: string;
-  reason: string;
-  opened_at: string;
-  status: string;
+export interface RetryResponse {
+  gate: GateResult;
+  payout: Payout;
+  /** Kasus D4 yang dibuka saat retry menemukan batch asli. */
+  case_id: string | null;
 }
 
-/** POST /milestones/{id}/messages mengembalikan baris ini. */
-export interface InboundMessage {
-  id: number;
-  milestone_id: string;
-  sender: string | null;
-  body: string;
-  received_at: string;
+export interface ReconcileResponse {
+  gate: GateResult;
+  payout: Payout;
+  case: CaseRecord;
 }
 
-export interface LivePayPalStatus {
-  payout_id: number;
-  attempt: number;
-  sender_batch_id: string;
-  payout_batch_id: string | null;
-  payout_item_id: string | null;
-  local_status: string;
-  live_item_status: string;
-  live_batch_status: string | null;
+export interface RecheckResponse {
+  payout: Payout;
+  case: CaseRecord;
 }
 
-export interface AllowedAction {
-  action: string;
-  reason: string;
+export interface SyncResponse {
+  payout: Payout;
 }
 
-export interface EmailDistance {
-  distance: number;
-  contract_email?: string;
-  live_payout_email?: string;
-  message_email: string;
-}
-
-/** GET /milestones/{id}/case-evidence. Status live diambil dari PayPal saat dipanggil. */
-export interface CaseEvidence {
-  milestone_id: string;
-  contract_email: string;
-  milestone_amount: number;
-  payouts: Payout[];
-  live_paypal_statuses: LivePayPalStatus[];
-  events: EventRecord[];
-  inbound_messages: InboundMessage[];
+export interface MessageResponse {
+  message: Message | string;
+  case_id: string | null;
   diversion_risk: boolean;
-  requires_out_of_band_verification: boolean;
-  extracted_message_emails: string[];
-  email_edit_distances: Record<string, EmailDistance>;
-  cases: CaseRecord[];
-  /** Hanya aksi yang DIIZINKAN. Aksi lain tidak dikirim backend. */
-  allowed_actions: AllowedAction[];
-}
-
-export interface CaseActionRequest {
-  action: string;
-  human_approved: boolean;
-  new_email?: string;
-  new_email_verified?: boolean;
-}
-
-/** Bentuk respons berbeda per aksi; field yang umum dipakai UI didaftarkan di sini. */
-export interface CaseActionResponse {
-  success?: boolean;
-  action?: string;
-  case_id?: number;
-  status?: string;
-  error?: string;
-  detail?: unknown;
-  cancel_unavailable?: boolean;
-  reissue_failed?: boolean;
-  paypal_name?: string;
-  status_code?: number;
-  debug_id?: string;
-  new_email?: string;
-  [key: string]: unknown;
-}
-
-export type DemoScenario = "timeout" | "unclaimed";
-
-/** POST /demo/reset */
-export interface ResetResponse {
-  scenario: DemoScenario;
-  contract: Contract;
-  milestones: Milestone[];
 }

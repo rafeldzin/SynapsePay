@@ -1,6 +1,6 @@
 /**
- * Timestamp SQLite (CURRENT_TIMESTAMP) disimpan dalam UTC tanpa penanda zona,
- * mis. "2026-11-11 08:44:22". Ditampilkan dalam waktu lokal browser.
+ * Timestamp backend selalu UTC ISO 8601 (mis. "2026-11-12T15:48:09Z").
+ * Ditampilkan dalam waktu lokal browser.
  */
 export function formatTimestamp(value: string | null | undefined): string {
   if (!value) return "—";
@@ -11,11 +11,12 @@ export function formatTimestamp(value: string | null | undefined): string {
 }
 
 /**
- * Format nominal dari backend. Kalau backend tidak mengirim mata uang,
+ * Nominal dari backend dalam sen (integer, INV-6). Kalau mata uang tidak dikirim,
  * angka ditampilkan tanpa simbol (tidak menebak USD).
  */
-export function formatMoney(amount: number | null | undefined, currency?: string | null): string {
-  if (amount === null || amount === undefined || Number.isNaN(amount)) return "—";
+export function formatCents(cents: number | null | undefined, currency?: string | null): string {
+  if (cents === null || cents === undefined || Number.isNaN(cents)) return "—";
+  const amount = cents / 100;
   if (!currency) return amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   try {
     return amount.toLocaleString("en-US", { style: "currency", currency });

@@ -1,4 +1,5 @@
 import { ApiError } from "../api/client";
+import GateChecklist from "./GateChecklist";
 
 interface Props {
   error: unknown;
@@ -6,11 +7,12 @@ interface Props {
   onRetry?: () => void;
 }
 
-/** Menampilkan nama error dan debug_id apa adanya dari backend/PayPal. */
+/** Menampilkan nama error, debug_id, dan (untuk HTTP 409) checklist gate apa adanya dari backend. */
 export default function ErrorBox({ error, title = "Permintaan gagal", onRetry }: Props) {
   const isApi = error instanceof ApiError;
   const name = isApi ? error.name : error instanceof Error ? error.name : "UNKNOWN_ERROR";
   const message = error instanceof Error ? error.message : String(error);
+  const gate = isApi ? error.gate : null;
 
   return (
     <div role="alert" className="rounded border border-red-200 bg-red-50 p-4 text-sm text-red-900">
@@ -26,9 +28,18 @@ export default function ErrorBox({ error, title = "Permintaan gagal", onRetry }:
             <dd className="font-mono">{error.status}</dd>
           </>
         )}
-        <dt className="text-red-700">debug_id</dt>
-        <dd className="font-mono">{isApi && error.debugId ? error.debugId : "—"}</dd>
+        {isApi && error.debugId && (
+          <>
+            <dt className="text-red-700">debug_id</dt>
+            <dd className="font-mono">{error.debugId}</dd>
+          </>
+        )}
       </dl>
+      {gate && (
+        <div className="mt-3 text-slate-900">
+          <GateChecklist checks={gate.checks} />
+        </div>
+      )}
       {onRetry && (
         <button
           type="button"

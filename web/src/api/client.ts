@@ -4,9 +4,13 @@
  * nama error dan debug_id (kalau backend/PayPal mengirimkannya).
  */
 
+import type { GateResult } from "./types";
+
 const API_BASE = import.meta.env.VITE_API_BASE ?? "/api";
 
 export class ApiError extends Error {
+  /** HTTP 409 dari gate: GateResult lengkap, supaya UI bisa menampilkan cek yang gagal. */
+  gate: GateResult | null;
   /** Nama error, mis. "VALIDATION_ERROR" dari PayPal atau "HTTP_500". */
   name: string;
   /** debug_id dari PayPal (diteruskan backend), kalau ada. */
@@ -16,12 +20,20 @@ export class ApiError extends Error {
   /** Isi mentah respons error, untuk ditampilkan di bagian detail. */
   raw: unknown;
 
-  constructor(opts: { name: string; message: string; debugId?: string | null; status: number; raw?: unknown }) {
+  constructor(opts: {
+    name: string;
+    message: string;
+    debugId?: string | null;
+    status: number;
+    raw?: unknown;
+    gate?: GateResult | null;
+  }) {
     super(opts.message);
     this.name = opts.name;
     this.debugId = opts.debugId ?? null;
     this.status = opts.status;
     this.raw = opts.raw;
+    this.gate = opts.gate ?? null;
   }
 }
 
@@ -39,15 +51,30 @@ function pickString(obj: Json, ...keys: string[]): string | null {
   return null;
 }
 
+function isGateResult(value: unknown): value is GateResult {
+  return isObject(value) && Array.isArray(value.checks) && typeof value.action === "string";
+}
+
 /**
- * Menerima beberapa bentuk error yang mungkin dikirim backend:
- *  - { detail: { name, message, debug_id } }   (format yang diusulkan ke tim backend)
- *  - { name, message, debug_id }                (format error PayPal yang diteruskan apa adanya)
- *  - { detail: "teks" }                         (HTTPException default FastAPI)
- *  - { detail: [ {loc, msg, type} ] }           (validasi Pydantic, HTTP 422)
+ * Menerima bentuk error yang dikirim backend (PRD 12):
+ *  - GateResult apa adanya                       (HTTP 409: gate menolak, tidak ada panggilan PayPal)
+ *  - { detail: "teks" }                         (HTTPException FastAPI: 404, 409, 413, 422)
+ *  - { detail: [ {loc, msg, type} ] }           (validasi Pydantic, HTTP 422: field tak dikenal ditolak)
+ *  - { detail: { name, message, debug_id } }    (kalau backend meneruskan error PayPal)
  */
 function toApiError(status: number, body: unknown): ApiError {
   const fallbackName = `HTTP_${status}`;
+
+  if (isGateResult(body)) {
+    const failed = body.checks.filter((c) => c.ok === false).map((c) => c.id);
+    return new ApiError({
+      name: "GATE_REFUSED",
+      message: `Gate ${body.action} menolak${failed.length ? `: ${failed.join(", ")}` : ""}. Tidak ada panggilan ke PayPal.`,
+      status,
+      raw: body,
+      gate: body,
+    });
+  }
 
   if (isObject(body)) {
     const detail = body.detail;
@@ -102,7 +129,7 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
   } catch (cause) {
     throw new ApiError({
       name: "NETWORK_ERROR",
-      message: "Backend tidak bisa dihubungi. Pastikan FastAPI jalan di http://localhost:8000.",
+      message: "Backend tidak bisa dihubungi. Pastikan FastAPI jalan di http://127.0.0.1:8000.",
       status: 0,
       raw: String(cause),
     });
@@ -127,7 +154,7 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
     if (proxyDown) {
       throw new ApiError({
         name: "BACKEND_UNREACHABLE",
-        message: "Backend tidak bisa dihubungi. Pastikan FastAPI jalan di http://localhost:8000.",
+        message: "Backend tidak bisa dihubungi. Pastikan FastAPI jalan di http://127.0.0.1:8000.",
         status: response.status,
         raw: body,
       });

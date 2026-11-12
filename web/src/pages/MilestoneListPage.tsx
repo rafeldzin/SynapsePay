@@ -1,142 +1,60 @@
-import { useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { getMilestone, getMilestones, resetDemo } from "../api/milestones";
-import { getPayouts, latestPayoutFor } from "../api/payouts";
-import type { DemoScenario, Milestone, Payout } from "../api/types";
+import { resetDemo } from "../api/milestones";
+import { latestPayoutFor } from "../api/payouts";
+import type { Scenario } from "../api/types";
 import ErrorBox from "../components/ErrorBox";
 import StatusBadge from "../components/StatusBadge";
-import { formatMoney } from "../lib/format";
+import { formatCents } from "../lib/format";
+import { useAppState } from "../lib/state";
 
-/** Mengelompokkan milestone per contract_id, urutan sesuai respons backend. */
-function groupByContract(milestones: Milestone[]) {
-  const groups = new Map<string, Milestone[]>();
-  for (const m of milestones) {
-    const key = m.contract_id ?? "__tanpa_kontrak__";
-    groups.set(key, [...(groups.get(key) ?? []), m]);
-  }
-  return [...groups.entries()];
-}
-
-/**
- * GET /milestones tidak menyertakan nama kontrak, jadi header mengambilnya
- * dari GET /milestones/{id} milestone pertama di grup.
- */
-function ContractSection({ milestones, payouts }: { milestones: Milestone[]; payouts: Payout[] | undefined }) {
-  const first = milestones[0];
-  const detail = useQuery({ queryKey: ["milestone", first.id], queryFn: () => getMilestone(first.id) });
-  const contract = detail.data?.contract ?? null;
-
-  return (
-    <section className="overflow-hidden rounded border border-slate-200 bg-white">
-      <div className="flex flex-wrap items-baseline gap-x-3 border-b border-slate-200 px-4 py-3">
-        <h2 className="font-semibold">
-          {contract ? (
-            <>
-              {contract.buyer_name ?? "—"} <span className="font-normal text-slate-400">membayar</span>{" "}
-              {contract.contractor_name ?? "—"}
-            </>
-          ) : (
-            "Kontrak"
-          )}
-        </h2>
-        {first.contract_id && <span className="font-mono text-xs text-slate-500">{first.contract_id}</span>}
-      </div>
-      <table className="w-full text-sm">
-        <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
-          <tr>
-            <th className="px-4 py-2 font-medium">Milestone</th>
-            <th className="px-4 py-2 font-medium">Penerima</th>
-            <th className="px-4 py-2 text-right font-medium">Nominal</th>
-            <th className="px-4 py-2 font-medium">Status payout PayPal</th>
-            <th className="px-4 py-2" />
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-slate-100">
-          {milestones.map((m) => {
-            const payout = latestPayoutFor(payouts, m.id);
-            return (
-              <tr key={m.id} className="hover:bg-slate-50">
-                <td className="px-4 py-3">
-                  <div className="font-medium">{m.title}</div>
-                  <div className="font-mono text-xs text-slate-400">{m.id}</div>
-                </td>
-                <td className="px-4 py-3 font-mono text-xs">{m.contractor_email}</td>
-                <td className="px-4 py-3 text-right tabular-nums">{formatMoney(m.amount, contract?.currency)}</td>
-                <td className="px-4 py-3">
-                  {payout ? (
-                    <StatusBadge status={payout.status} />
-                  ) : (
-                    <span className="text-xs text-slate-400">belum ada payout</span>
-                  )}
-                </td>
-                <td className="px-4 py-3 text-right">
-                  <Link
-                    to={`/milestones/${encodeURIComponent(m.id)}`}
-                    className="rounded border border-slate-300 px-3 py-1 text-xs hover:bg-white"
-                  >
-                    Buka
-                  </Link>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </section>
-  );
-}
-
-const SCENARIOS: { value: DemoScenario; label: string }[] = [
-  { value: "timeout", label: "timeout (email M1 benar)" },
-  { value: "unclaimed", label: "unclaimed (email M1 salah ketik)" },
-];
+/** Teks sama dengan banner skenario di app/static/app.js. */
+const SCENARIO_TEXT: Record<Scenario, string> = {
+  A: "Skenario A: m1 dibayar ke email yang salah ketik dan berstatus UNCLAIMED. Kontraktor mengirim pesan, investigator menyarankan cancel lalu terbitkan ulang setelah email baru dikonfirmasi.",
+  B: "Skenario B: respons PayPal pertama sengaja dibuang (fault simulasi), jadi ledger UNKNOWN. Retry dengan kunci yang sama menemukan batch asli, investigator menyarankan rekonsiliasi, manusia menyetujuinya setelah gate membaca PayPal lagi, dan tidak ada yang dibayar dua kali.",
+};
 
 function ResetDemoControl() {
   const queryClient = useQueryClient();
-  const [scenario, setScenario] = useState<DemoScenario>("timeout");
   const reset = useMutation({
-    mutationFn: () => resetDemo(scenario),
+    mutationFn: (scenario: Scenario) => resetDemo(scenario),
     // Semua data di layar lain ikut kedaluwarsa setelah reset.
     onSuccess: () => queryClient.invalidateQueries(),
   });
 
-  const onClick = () => {
+  const onClick = (scenario: Scenario) => {
     if (reset.isPending) return;
     const ok = window.confirm(
-      `Reset demo dengan skenario "${scenario}"?\n\nSemua milestone, payout, event, dan kasus di backend akan dihapus lalu diisi ulang.`,
+      `Reset demo ke skenario ${scenario}?\n\nDatabase lokal dikosongkan (termasuk timeline event) lalu diisi ulang dengan run ID baru. Payout sandbox yang sudah terkirim tetap tercatat di PayPal.`,
     );
-    if (ok) reset.mutate();
+    if (ok) reset.mutate(scenario);
   };
 
   return (
     <div className="flex flex-col items-end gap-2">
       <div className="flex items-center gap-2">
-        <select
-          value={scenario}
-          onChange={(e) => setScenario(e.target.value as DemoScenario)}
-          disabled={reset.isPending}
-          className="rounded border border-slate-300 bg-white px-2 py-1.5 text-sm"
-          aria-label="Skenario demo"
-        >
-          {SCENARIOS.map((s) => (
-            <option key={s.value} value={s.value}>
-              {s.label}
-            </option>
-          ))}
-        </select>
         <button
           type="button"
-          onClick={onClick}
+          onClick={() => onClick("B")}
           disabled={reset.isPending}
-          className="rounded border border-slate-300 bg-white px-3 py-1.5 text-sm hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded bg-blue-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-800 disabled:opacity-50"
         >
-          {reset.isPending ? "Mereset…" : "Reset demo"}
+          Reset demo (B)
+        </button>
+        <button
+          type="button"
+          onClick={() => onClick("A")}
+          disabled={reset.isPending}
+          className="rounded border border-slate-300 bg-white px-3 py-1.5 text-sm hover:bg-slate-100 disabled:opacity-50"
+        >
+          Reset demo (A)
         </button>
       </div>
+      {reset.isPending && <span className="text-xs text-slate-500">Mereset…</span>}
       {reset.isSuccess && (
         <span className="text-xs text-green-700">
-          Demo direset dengan skenario <span className="font-mono">{reset.data.scenario}</span>.
+          Direset ke skenario <span className="font-mono">{reset.data.scenario}</span>, run{" "}
+          <span className="font-mono">{reset.data.run_id}</span>.
         </span>
       )}
       {reset.isError && (
@@ -149,8 +67,9 @@ function ResetDemoControl() {
 }
 
 export default function MilestoneListPage() {
-  const milestones = useQuery({ queryKey: ["milestones"], queryFn: getMilestones });
-  const payouts = useQuery({ queryKey: ["payouts"], queryFn: getPayouts });
+  const state = useAppState();
+  const s = state.data;
+  const currency = s?.contract?.currency;
 
   return (
     <div className="space-y-4">
@@ -158,35 +77,91 @@ export default function MilestoneListPage() {
         <div>
           <h1 className="text-xl font-semibold">Milestone</h1>
           <p className="text-sm text-slate-500">
-            Pekerjaan diverifikasi dulu, lalu dibayar langsung dari akun pembeli setelah disetujui. Tidak ada dana
-            yang ditahan.
+            Pekerjaan diverifikasi dulu, lalu dibayar langsung dari akun pembeli setelah gate lolos dan manusia
+            menyetujui. Tidak ada dana yang ditahan.
           </p>
         </div>
         <ResetDemoControl />
       </div>
 
-      {milestones.isPending && (
-        <div className="rounded border border-slate-200 bg-white p-6 text-sm text-slate-500">Memuat milestone…</div>
+      {s?.scenario && (
+        <div className="rounded border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">{SCENARIO_TEXT[s.scenario]}</div>
       )}
 
-      {milestones.isError && (
-        <ErrorBox error={milestones.error} title="Gagal memuat milestone" onRetry={() => milestones.refetch()} />
+      {state.isPending && (
+        <div className="rounded border border-slate-200 bg-white p-6 text-sm text-slate-500">Memuat state…</div>
       )}
+      {state.isError && <ErrorBox error={state.error} title="Gagal memuat /api/state" onRetry={() => state.refetch()} />}
 
-      {payouts.isError && (
-        <ErrorBox error={payouts.error} title="Gagal memuat status payout" onRetry={() => payouts.refetch()} />
+      {s && (
+        <section className="overflow-hidden rounded border border-slate-200 bg-white">
+          <div className="flex flex-wrap items-baseline gap-x-3 border-b border-slate-200 px-4 py-3">
+            <h2 className="font-semibold">
+              {s.contract ? (
+                <>
+                  {s.contract.buyer_name} <span className="font-normal text-slate-400">membayar</span>{" "}
+                  {s.contract.contractor_name}
+                </>
+              ) : (
+                "Kontrak"
+              )}
+            </h2>
+            {s.contract && (
+              <span className="font-mono text-xs text-slate-500">
+                {s.contract.id} · ke {s.contract.payee_email}
+              </span>
+            )}
+            <span className="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600">data seed</span>
+          </div>
+          {s.milestones.length === 0 ? (
+            <p className="p-4 text-sm text-slate-500">Belum ada milestone. Tekan "Reset demo (B)".</p>
+          ) : (
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+                <tr>
+                  <th className="px-4 py-2 font-medium">Milestone</th>
+                  <th className="px-4 py-2 text-right font-medium">Nominal</th>
+                  <th className="px-4 py-2 font-medium">Status milestone</th>
+                  <th className="px-4 py-2 font-medium">Payout terakhir</th>
+                  <th className="px-4 py-2" />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {s.milestones.map((m) => {
+                  const payout = latestPayoutFor(s.payouts, m.id);
+                  return (
+                    <tr key={m.id} className="hover:bg-slate-50">
+                      <td className="px-4 py-3">
+                        <div className="font-medium">{m.title}</div>
+                        <div className="font-mono text-xs text-slate-400">{m.id}</div>
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums">{formatCents(m.amount_cents, currency)}</td>
+                      <td className="px-4 py-3">
+                        <StatusBadge status={m.state} />
+                      </td>
+                      <td className="px-4 py-3">
+                        {payout ? (
+                          <StatusBadge status={payout.state} />
+                        ) : (
+                          <span className="text-xs text-slate-400">belum ada payout</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <Link
+                          to={`/milestones/${encodeURIComponent(m.id)}`}
+                          className="rounded border border-slate-300 px-3 py-1 text-xs hover:bg-white"
+                        >
+                          Buka
+                        </Link>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </section>
       )}
-
-      {milestones.isSuccess && milestones.data.length === 0 && (
-        <div className="rounded border border-slate-200 bg-white p-6 text-sm text-slate-500">
-          Belum ada milestone. Tekan "Reset demo" untuk mengisi data demo.
-        </div>
-      )}
-
-      {milestones.isSuccess &&
-        groupByContract(milestones.data).map(([key, items]) => (
-          <ContractSection key={key} milestones={items} payouts={payouts.data} />
-        ))}
     </div>
   );
 }

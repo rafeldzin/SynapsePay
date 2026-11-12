@@ -1,0 +1,140 @@
+{
+  "ran_at": "2026-11-12T15:13:32Z",
+  "token_ok": true,
+  "success_seconds": 18.0,
+  "unclaimed_reproduced": true,
+  "cancel_status_code": 200,
+  "cancel_debug_id": null,
+  "cancel_response_body": {
+    "payout_item_id": "UTB55UUSY8AQJ",
+    "transaction_id": "01F250301T331351M",
+    "activity_id": "2AS520211J040045W",
+    "transaction_status": "RETURNED",
+    "payout_item_fee": {
+      "currency": "USD",
+      "value": "0.02"
+    },
+    "payout_batch_id": "UM7PBYCS97KU4",
+    "sender_batch_id": "G0-1794496412-2",
+    "payout_item": {
+      "recipient_type": "EMAIL",
+      "amount": {
+        "currency": "USD",
+        "value": "1.00"
+      },
+      "note": "Gate 0 unclaimed path",
+      "receiver": "sb-2o22h53559924x@personal.example.com",
+      "sender_item_id": "G0-1794496412-2-I1",
+      "recipient_wallet": "PAYPAL",
+      "purpose": "GOODS"
+    },
+    "time_processed": "2026-11-12T15:14:08Z",
+    "errors": {
+      "name": "RECEIVER_UNREGISTERED",
+      "message": "The recipient for this payout does not have an account. A link to sign up for an account was sent to the recipient. However, if the recipient does not claim this payout within 30 days, the funds will be returned to your account.",
+      "information_link": "https://developer.paypal.com/docs/api/payments.payouts-batch/#errors",
+      "details": [],
+      "links": []
+    },
+    "links": [
+      {
+        "href": "https://api.sandbox.paypal.com/v1/payments/payouts-item/UTB55UUSY8AQJ",
+        "rel": "self",
+        "method": "GET",
+        "encType": "application/json"
+      },
+      {
+        "href": "https://api.sandbox.paypal.com/v1/payments/payouts/UM7PBYCS97KU4",
+        "rel": "batch",
+        "method": "GET",
+        "encType": "application/json"
+      }
+    ]
+  },
+  "cancel_batch_status_at_call": "SUCCESS",
+  "cancel_returned": true,
+  "duplicate_behavior": "rejected_with_link",
+  "duplicate_status_code": 400,
+  "duplicate_response_body": {
+    "name": "USER_BUSINESS_ERROR",
+    "message": "User business error.",
+    "debug_id": "f37331691ae10",
+    "information_link": "https://developer.paypal.com/docs/api/payments.payouts-batch/#errors",
+    "details": [
+      {
+        "field": "SENDER_BATCH_ID",
+        "location": "body",
+        "issue": "Batch with given sender_batch_id already exists",
+        "link": [
+          {
+            "href": "https://api.sandbox.paypal.com/v1/payments/payouts/MP7ERHRE5EQF6",
+            "rel": "self",
+            "method": "GET",
+            "encType": "application/json"
+          }
+        ]
+      }
+    ],
+    "links": []
+  },
+  "duplicate_original_batch_id": "MP7ERHRE5EQF6",
+  "duplicate_matches_original": true,
+  "cancel_on_success_error_name": "ITEM_INCORRECT_STATUS",
+  "cancel_on_success_status_code": 400,
+  "cancel_on_success_debug_id": "f6155150bef1c",
+  "steps": [
+    {
+      "id": "UAT-G0-01",
+      "name": "OAuth token",
+      "result": "PASS",
+      "detail": "HTTP 200, host api-m.sandbox.paypal.com"
+    },
+    {
+      "id": "UAT-G0-02",
+      "name": "Create payout (correct email)",
+      "result": "PASS",
+      "detail": "HTTP 201, payout_batch_id=MP7ERHRE5EQF6",
+      "sender_batch_id": "G0-1794496412-1",
+      "payout_batch_id": "MP7ERHRE5EQF6",
+      "debug_id": null
+    },
+    {
+      "id": "UAT-G0-03",
+      "name": "Item reaches SUCCESS",
+      "result": "PASS",
+      "detail": "item SUCCESS after 18.0s, batch PROCESSING",
+      "payout_batch_id": "MP7ERHRE5EQF6",
+      "payout_item_id": "R9L5F35A2XLXL"
+    },
+    {
+      "id": "UAT-G0-04",
+      "name": "Typo email reaches UNCLAIMED",
+      "result": "PASS",
+      "detail": "item UNCLAIMED after 18.1s, batch PROCESSING",
+      "sender_batch_id": "G0-1794496412-2",
+      "payout_batch_id": "UM7PBYCS97KU4",
+      "payout_item_id": "UTB55UUSY8AQJ"
+    },
+    {
+      "id": "UAT-G0-05",
+      "name": "Cancel unclaimed item",
+      "result": "PASS",
+      "detail": "batch SUCCESS at call, HTTP 200, name=None, debug_id=None, status=RETURNED",
+      "payout_item_id": "UTB55UUSY8AQJ"
+    },
+    {
+      "id": "UAT-G0-06",
+      "name": "Duplicate sender_batch_id",
+      "result": "PASS",
+      "detail": "HTTP 400, behavior=rejected_with_link, original batch=MP7ERHRE5EQF6, matches G0-02=True",
+      "payout_batch_id": "MP7ERHRE5EQF6"
+    },
+    {
+      "id": "UAT-G0-07",
+      "name": "Cancel a SUCCESS item is rejected",
+      "result": "PASS",
+      "detail": "HTTP 400, name=ITEM_INCORRECT_STATUS, debug_id=f6155150bef1c",
+      "payout_item_id": "R9L5F35A2XLXL"
+    }
+  ]
+}

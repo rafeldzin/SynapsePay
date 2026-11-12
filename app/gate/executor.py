@@ -25,6 +25,7 @@ class ExecResult:
     gate: GateResult
     payout: dict | None = None
     case_id: str | None = None
+    case: dict | None = None
 
     @property
     def allowed(self) -> bool:
@@ -69,12 +70,43 @@ def _record_rejected(conn: sqlite3.Connection, payout: sqlite3.Row | dict, exc: 
     _milestone_back_to_verdict(conn, payout["milestone_id"])
 
 
-def _call_create(payout: dict):
-    """The one PayPal create call. Recipient, amount and key come from the payout row (INV-6)."""
-    return writes.create_payout(
-        sender_batch_id=payout["sender_batch_id"], receiver_email=payout["recipient_email"],
-        amount_cents=payout["amount_cents"], currency=payout["currency"],
-        note=f"Milestone {payout['milestone_id']}")
+class SimulatedOutcomeUnknown(PayPalOutcomeUnknown):
+    """An outcome made unknown on purpose by an armed demo fault (PRD 12.2). Labeled simulated."""
+
+    def __init__(self, fault: str, message: str):
+        super().__init__(message)
+        self.fault = fault
+
+
+def _take_armed_fault(conn: sqlite3.Connection) -> str | None:
+    """Consumes the armed demo fault, if any: the next create_payout gets it, once."""
+    with db.tx(conn):
+        row = conn.execute("SELECT value FROM meta WHERE key = 'armed_fault'").fetchone()
+        if row:
+            conn.execute("DELETE FROM meta WHERE key = 'armed_fault'")
+    return row["value"] if row else None
+
+
+def _call_create(conn: sqlite3.Connection, payout: dict):
+    """The one PayPal create call. Recipient, amount and key come from the payout row (INV-6).
+
+    The demo fault hook lives here, not in the AI or the gate (PRD 12.2). timeout_after_send
+    really sends the request and then discards PayPal's answer, so a payout may exist at PayPal
+    while the ledger cannot know it: that is the scenario B exception.
+    """
+    kwargs = dict(sender_batch_id=payout["sender_batch_id"], receiver_email=payout["recipient_email"],
+                  amount_cents=payout["amount_cents"], currency=payout["currency"],
+                  note=f"Milestone {payout['milestone_id']}")
+    fault = _take_armed_fault(conn)
+    if fault == "timeout_before_send":
+        raise SimulatedOutcomeUnknown(fault, "simulated fault: the request was never sent")
+    if fault == "timeout_after_send":
+        try:
+            writes.create_payout(**kwargs)
+        except Exception:  # whatever PayPal answered is discarded on purpose
+            pass
+        raise SimulatedOutcomeUnknown(fault, "simulated fault: the request was sent, the response was lost")
+    return writes.create_payout(**kwargs)
 
 
 # ---- PAY ----------------------------------------------------------------------
@@ -125,7 +157,7 @@ def pay(milestone_id: str, *, approved_by: str | None, confirm: bool | None,
         # PayPal is called outside any transaction. The CREATING row is already committed.
         outcome, error = None, None
         try:
-            outcome = _call_create(payout)
+            outcome = _call_create(conn, payout)
         except PayPalOutcomeUnknown as exc:
             error = exc
         except PayPalRejected as exc:
@@ -154,7 +186,8 @@ def pay(milestone_id: str, *, approved_by: str | None, confirm: bool | None,
                 detect.open_case(conn, payout_id, "D4")
             elif isinstance(error, PayPalOutcomeUnknown):
                 events.append(conn, "PAYPAL_OUTCOME_UNKNOWN", "paypal", contract_id=contract_id,
-                              milestone_id=milestone_id, payout_id=payout_id, payload={"detail": str(error)})
+                              milestone_id=milestone_id, payout_id=payout_id, payload={"detail": str(error),
+                                       "simulated_fault": getattr(error, "fault", None)})
                 _set_payout_state(conn, row, "UNKNOWN", "outcome_unknown")
             else:
                 _record_rejected(conn, row, error, "paypal_rejected")
@@ -186,7 +219,7 @@ def retry(payout_id: str, *, approved_by: str | None, confirm: bool | None) -> E
 
         outcome, error = None, None
         try:
-            outcome = _call_create(payout)
+            outcome = _call_create(conn, payout)
         except (PayPalOutcomeUnknown, PayPalRejected) as exc:
             error = exc
         except PayPalAuthError as exc:
@@ -208,11 +241,67 @@ def retry(payout_id: str, *, approved_by: str | None, confirm: bool | None) -> E
             elif isinstance(error, PayPalOutcomeUnknown):
                 events.append(conn, "PAYPAL_OUTCOME_UNKNOWN", "paypal", contract_id=contract_id,
                               milestone_id=row["milestone_id"], payout_id=payout_id,
-                              payload={"detail": str(error), "on_retry": True})
+                              payload={"detail": str(error), "on_retry": True,
+                                       "simulated_fault": getattr(error, "fault", None)})
             else:
                 _record_rejected(conn, row, error, "retry_rejected")
             final = _payout_row(conn, payout_id)
         return ExecResult(gate=gate, payout=final, case_id=case_id)
+    finally:
+        conn.close()
+
+
+# ---- RECONCILE ----------------------------------------------------------------
+
+def reconcile(case_id: str, *, approved_by: str | None, confirm: bool | None) -> ExecResult:
+    """Gated RECONCILE of an UNKNOWN payout that PayPal shows as SUCCESS (PRD 10, 6.2, 6.3).
+
+    Makes no PayPal write. The ledger moves to PAID only after a fresh batch read agrees with it
+    and a human approves. Raises LookupError for an unknown case.
+    """
+    conn = db.connect()
+    try:
+        case = conn.execute("SELECT * FROM cases WHERE id = ?", (case_id,)).fetchone()
+        if case is None:
+            raise LookupError(f"unknown case {case_id!r}")
+        fresh = policy.read_fresh_batch(_payout_row(conn, case["payout_id"]))  # no write lock held
+        with db.tx(conn):
+            payout = conn.execute("SELECT * FROM payouts WHERE id = ?", (case["payout_id"],)).fetchone()
+            case = conn.execute("SELECT * FROM cases WHERE id = ?", (case_id,)).fetchone()
+            gate = policy.evaluate_reconcile(conn, payout["id"], fresh=fresh, approved_by=approved_by,
+                                             confirm=confirm)
+            contract_id = conn.execute("SELECT contract_id FROM milestones WHERE id = ?",
+                                       (payout["milestone_id"],)).fetchone()["contract_id"]
+            ids = dict(contract_id=contract_id, milestone_id=payout["milestone_id"], payout_id=payout["id"],
+                       case_id=case_id)
+            events.append(conn, "GATE_EVALUATED", _actor(approved_by), payload=gate.model_dump(), **ids)
+            if not gate.allowed:
+                return ExecResult(gate=gate, payout=dict(payout), case_id=case_id, case=dict(case))
+
+            item = fresh.items[0]
+            ts = now_iso()
+            events.append(conn, "PAYPAL_STATUS_READ", "paypal", paypal_batch_id=fresh.payout_batch_id,
+                          paypal_item_id=item.payout_item_id, **ids,
+                          payload={"item_status": item.transaction_status, "batch_status": fresh.batch_status,
+                                   "source": "reconcile"})
+            _set_payout_state(conn, payout, "PAID", "reconcile", payout_item_id=item.payout_item_id,
+                              item_status=item.transaction_status, batch_status=fresh.batch_status,
+                              last_synced_at=ts)
+            milestone = conn.execute("SELECT state FROM milestones WHERE id = ?",
+                                     (payout["milestone_id"],)).fetchone()
+            if milestone["state"] == "PAYOUT_IN_FLIGHT":
+                conn.execute("UPDATE milestones SET state = 'PAID', updated_at = ? WHERE id = ?",
+                             (ts, payout["milestone_id"]))
+                events.append(conn, "MILESTONE_STATE_CHANGED", "system", contract_id=contract_id,
+                              milestone_id=payout["milestone_id"],
+                              payload={"from": "PAYOUT_IN_FLIGHT", "to": "PAID"})
+            conn.execute("UPDATE cases SET state = 'RESOLVED', resolution = 'RECONCILED_PAID', updated_at = ? "
+                         "WHERE id = ?", (ts, case_id))
+            events.append(conn, "CASE_STATE_CHANGED", "system", **ids,
+                          payload={"from": case["state"], "to": "RESOLVED", "resolution": "RECONCILED_PAID"})
+            return ExecResult(
+                gate=gate, payout=_payout_row(conn, payout["id"]), case_id=case_id,
+                case=dict(conn.execute("SELECT * FROM cases WHERE id = ?", (case_id,)).fetchone()))
     finally:
         conn.close()
 

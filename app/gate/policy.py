@@ -9,8 +9,9 @@ import sqlite3
 from urllib.parse import urlparse
 
 from app.config import SANDBOX_HOST, get_settings
-from app.contracts import GateCheck, GateResult
+from app.contracts import BatchView, GateCheck, GateResult
 from app.events import now_iso
+from app.paypal import reads
 
 LIVE_STATES = ("CREATING", "UNKNOWN", "SENT", "UNCLAIMED", "PAID")
 OVERRIDE_MIN_CHARS = 20
@@ -122,6 +123,63 @@ def evaluate_pay(conn: sqlite3.Connection, milestone_id: str, *, approved_by: st
     checks = [verdict, current, amount, no_live, no_case, key,
               _human_approval(approved_by, confirm, preview, "PAY-7"), _sandbox_only("PAY-8")]
     return _result("PAY", checks, preview)
+
+
+def read_fresh_batch(payout) -> BatchView | Exception | None:
+    """A PayPal read made during this gate evaluation, never a stored status (PRD 10).
+
+    Returns the BatchView, the exception if the read failed (the gate then fails the check with
+    that detail), or None when the payout has no batch id yet. Taken before the write transaction
+    so no network call runs under the write lock.
+    """
+    if not payout["payout_batch_id"]:
+        return None
+    try:
+        return reads.get_batch(payout["payout_batch_id"])
+    except Exception as exc:  # any failed read is "no fresh evidence"
+        return exc
+
+
+def evaluate_reconcile(conn: sqlite3.Connection, payout_id: str, *, fresh: BatchView | Exception | None,
+                       approved_by: str | None = None, confirm: bool | None = None,
+                       preview: bool = False) -> GateResult:
+    """RC-1 to RC-5. RECONCILE makes no PayPal write: it only moves the ledger to PAID (PRD 10)."""
+    p = conn.execute("SELECT * FROM payouts WHERE id = ?", (payout_id,)).fetchone()
+    if p is None:
+        raise LookupError(f"unknown payout {payout_id!r}")
+    ok1 = p["state"] == "UNKNOWN" and bool(p["payout_batch_id"])
+    checks = [GateCheck(id="RC-1", name="state_unknown_with_batch", ok=ok1,
+                        detail=f"payout state is {p['state']}, batch id "
+                               f"{p['payout_batch_id'] or 'not stored'}")]
+
+    view = fresh if isinstance(fresh, BatchView) else None
+    no_read = ("no batch id to read" if fresh is None
+               else f"the fresh PayPal read failed: {type(fresh).__name__}: {fresh}")
+    item = view.items[0] if view and len(view.items) == 1 else None
+    if view is None:
+        checks.append(GateCheck(id="RC-2", name="same_batch", ok=False, detail=no_read))
+    else:
+        checks.append(GateCheck(
+            id="RC-2", name="same_batch",
+            ok=view.sender_batch_id == p["sender_batch_id"] and len(view.items) == 1,
+            detail=f"PayPal batch {view.payout_batch_id} has sender_batch_id {view.sender_batch_id!r} and "
+                   f"{len(view.items)} item(s); the ledger expects {p['sender_batch_id']!r} and one item"))
+    checks.append(GateCheck(
+        id="RC-3", name="item_success", ok=item is not None and item.transaction_status == "SUCCESS",
+        detail=no_read if view is None else
+        f"item status is {item.transaction_status}" if item else "the batch does not hold exactly one item"))
+    if item is None:
+        checks.append(GateCheck(id="RC-4", name="matches_ledger", ok=False,
+                                detail=no_read if view is None else "no single item to compare"))
+    else:
+        same = (item.amount_cents == p["amount_cents"] and item.currency == p["currency"]
+                and item.receiver.lower() == p["recipient_email"].lower())
+        checks.append(GateCheck(
+            id="RC-4", name="matches_ledger", ok=same,
+            detail=f"PayPal item: {item.amount_cents} {item.currency} to {item.receiver}; "
+                   f"ledger: {p['amount_cents']} {p['currency']} to {p['recipient_email']}"))
+    checks.append(_human_approval(approved_by, confirm, preview, "RC-5"))
+    return _result("RECONCILE", checks, preview)
 
 
 def evaluate_retry(conn: sqlite3.Connection, payout_id: str, *, approved_by: str | None = None,

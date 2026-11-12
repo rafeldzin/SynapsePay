@@ -8,7 +8,7 @@ A business that pays contractors per milestone through PayPal hits two costly mo
 
 | | |
 |---|---|
-| Hosted demo | _added at deploy_ (no login; Render Free tier, so click **Reset demo (B)** after it wakes, see [Hosted demo on Render Free](#hosted-demo-on-render-free)) |
+| Hosted demo | `https://<username>-<space-name>.hf.space` (placeholder until the Space is live). No login. Free Hugging Face Space, so click **Reset demo (B)** after it wakes, see [Hosted demo on Hugging Face Spaces](#hosted-demo-on-hugging-face-spaces) |
 | Demo video | _added at upload_ |
 | Specification | [`docs/PRD.md`](docs/PRD.md) (requirements) and [`docs/UAT.md`](docs/UAT.md) (acceptance tests) |
 | License | [MIT](LICENSE) |
@@ -175,16 +175,20 @@ uvicorn app.main:app --port 8000 --workers 1
 
 Open <http://localhost:8000>. A fresh start with no database creates the schema. Keep one worker: the gate's concurrency guarantees assume a single process next to SQLite.
 
-### Hosted demo on Render Free
+### Hosted demo on Hugging Face Spaces
 
-The hosted app runs on Render's **Free** web service tier. This deviates from PRD section 16, which assumes a paid instance (and UAT-HOST-04, which checks for one). Start command: `uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1`.
+The hosted app runs as a **Docker Space on Hugging Face Spaces, free tier**, at `https://<username>-<space-name>.hf.space` (the real link replaces this placeholder once the Space is live).
 
-What the Free tier means for anyone trying the demo:
+**Deployed as a Docker Space; the Dockerfile is a deploy wrapper only.** It is kept in a git-ignored deploy folder, not in this repository, so the repo itself stays free of Docker (PRD section 3.2). The app is the same single process as locally: `uvicorn app.main:app` with `--workers 1`, and every variable from the configuration table set as a Space secret or variable, with `DB_PATH` pointing under `/tmp`.
 
-- **The instance sleeps after a period of inactivity.** The first request after that waits for a cold start, roughly 30 to 50 seconds. The page stays blank or loading until then. Please wait; a reload is not needed.
-- **The disk is ephemeral.** The SQLite database is lost whenever the instance restarts or wakes from sleep. The app then starts with an empty database and seeds **scenario A** (PRD section 16).
+This deviates from PRD section 16 and UAT-HOST-04, which assume a paid Render instance.
+
+What the free tier means for anyone trying the demo:
+
+- **The Space sleeps after a period of inactivity.** The first request after that waits for a cold start, roughly 30 to 50 seconds. The page stays blank or loading until then. Please wait; a reload is not needed.
+- **The database does not survive a restart.** The SQLite file lives in `/tmp`, which is cleared whenever the Space restarts or wakes from sleep. The app then starts with an empty database and seeds **scenario A** (PRD section 16).
 - **So click "Reset demo (B)" after every wake-up or restart.** It reseeds scenario B, the primary demo, and gives a fresh run ID. Use "Reset demo (A)" for the alternate scenario.
-- **Nothing runs while the instance sleeps**, including the background status polling. A payout still in flight when the instance went to sleep is not synced, and the reset clears it with everything else.
+- **Nothing runs while the Space sleeps**, including the background status polling. A payout still in flight when the Space went to sleep is not synced, and the reset clears it with everything else.
 - **Money is never at risk from this.** Every payout is a PayPal sandbox payout. The sandbox keeps its own record, but the app's ledger and timeline start over.
 
 ### Configuration (`.env`)
@@ -267,7 +271,7 @@ JSON over HTTP (PRD 12). Gate refusals return **409** with the full `GateResult`
 | Operator page (`app/static/`) | Done. Scenario B runs on it from reset to reconcile. The cancel and reissue buttons call routes that do not exist yet and show a "not available" message. |
 | `CANCEL` and `REISSUE` gates and routes (`POST /api/cases/{id}/actions/cancel` and `.../reissue`) | **Not built.** Scenario A currently ends at the investigator's `CANCEL_UNCLAIMED_AND_REISSUE` recommendation. The UAT-RES rows have no tests yet. |
 | `scripts/e2e.py` end-to-end runner (UAT-E2E) | **Not built** |
-| Deployment | The repo has no deploy file. Per PRD 16 the Render service and its variables are set in the Render dashboard. The hosted URL above is still a placeholder. |
+| Deployment | Docker Space on Hugging Face Spaces (free). The Dockerfile is a deploy wrapper kept in a git-ignored deploy folder, so the repo has no deploy file. The hosted URL above is still a placeholder. |
 
 Not built by decision (PRD 14.1, cut 1): reset-time cancel of unclaimed items, the `LLM_DAILY_CALL_CAP` limit, and an override control in the UI. The `override_reason` gate check and API stay.
 

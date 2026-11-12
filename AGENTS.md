@@ -14,7 +14,7 @@ Hackathon MVP: FastAPI + SQLite monolith that verifies contractor work and pays 
 - **Two-Key Rule (INV-4)** AI recommends, the deterministic gate checks (re-evaluated server-side at execution time, with fresh PayPal reads where the PRD says so), a human approves in the same request. Only then may a PayPal write run. AI output is an input to the gate, never a trigger.
 - **INV-2** PayPal write functions live only in `app/paypal/writes.py`, imported ONLY by `app/gate/executor.py`.
 - **INV-3** `app/verify/`, `app/investigate/`, `app/llm.py` never import `paypal.writes`, `paypal.http` or `gate.executor`. Investigator tools are the four read-only tools in PRD 11.2.
-- **Import rules** The LLM SDK is imported ONLY by `app/llm.py` (PRD 4.3 table). `paypal.reads` is imported by `investigate/tools.py` and `gate/policy.py` only.
+- **Import rules** The LLM SDK is imported ONLY by `app/llm.py` (PRD 4.3 table). `paypal.reads` is imported by `investigate/tools.py`, `gate/policy.py` and `paypal/sync.py` only (sync.py does read-only batch polling, PRD 8.5). `paypal/sync.py` may also import `db`, `events` and `cases` to persist sync updates, write events and run detection; it never imports `paypal.writes`, `paypal.http` or `gate.executor`.
 - **INV-6** Amount, currency and recipient come from the database. Request bodies use `extra="forbid"`. Money is integer cents.
 - **INV-5** At most one live payout per milestone (partial unique index plus gate).
 - **INV-7** `events` is append-only (SQLite triggers). Never UPDATE or DELETE it. Every state change and every PayPal call writes an event using the exact types in PRD 5.1.

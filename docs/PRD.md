@@ -197,7 +197,8 @@ docs/PRD.md, docs/UAT.md, docs/gate0_result.json
 | `verify/*`, `investigate/*`, `llm.py` | `contracts`, `config`, `events`, `db` (read), `paypal.reads` (investigate/tools.py only) | `paypal.writes`, `gate.executor`, `paypal.http` |
 | `gate/policy.py` | `contracts`, `db`, `paypal.reads` | `paypal.writes`, `llm` |
 | `gate/executor.py` | everything it needs, including `paypal.writes` | `llm`, `verify`, `investigate` |
-| `paypal/*` | `config`, `contracts` | `llm`, `verify`, `investigate`, `gate` |
+| `paypal/*` (except `sync.py`, below) | `config`, `contracts` | `llm`, `verify`, `investigate`, `gate` |
+| `paypal/sync.py` | `config`, `contracts`, `paypal.reads`, `db`, `events`, `cases` | `paypal.writes`, `paypal.http`, `gate.executor` |
 | any module other than `llm.py` | | an LLM SDK |
 
 ### 4.4 Runtime rules

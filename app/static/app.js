@@ -31,7 +31,7 @@ const FIXTURES = {m1_pass: "m1", m2_fail_injected: "m2", m2_fail_clean: "m2", m2
 
 const SCENARIO_HINT = {
   A: "Scenario A: m1 is paid to a mistyped email and sits UNCLAIMED. The contractor writes in, the investigator recommends cancel and reissue after the new email is confirmed.",
-  B: "Scenario B: the first PayPal response is discarded on purpose (simulated fault), so the ledger says UNKNOWN. Retry with the same key finds the original, the investigator recommends reconcile, and nothing is paid twice.",
+  B: "Scenario B: the first PayPal response is discarded on purpose (simulated fault), so the ledger says UNKNOWN. Retry with the same key finds the original, the investigator recommends reconcile, a human approves it after the gate's fresh PayPal read, and nothing is paid twice.",
 };
 
 const ui = {

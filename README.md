@@ -8,7 +8,7 @@ A business that pays contractors per milestone through PayPal hits two costly mo
 
 | | |
 |---|---|
-| Hosted demo | `https://<username>-<space-name>.hf.space` (placeholder until the Space is live). No login. Free Hugging Face Space, so click **Reset demo (B)** after it wakes, see [Hosted demo on Hugging Face Spaces](#hosted-demo-on-hugging-face-spaces) |
+| How it runs | **Locally** at `http://127.0.0.1:8000`, connected to the live PayPal Sandbox and the live Gemini API. There is no hosted deployment. See [Local setup and running the demo](#local-setup-and-running-the-demo) |
 | Demo video | _added at upload_ |
 | Specification | [`docs/PRD.md`](docs/PRD.md) (requirements) and [`docs/UAT.md`](docs/UAT.md) (acceptance tests) |
 | License | [MIT](LICENSE) |
@@ -149,47 +149,109 @@ In both scenarios milestone 2 fails verification. Its report claims "all 412 dup
 
 ---
 
-## Run it locally
+## How to get API keys
 
-Requirements: Python 3.11 or newer.
+You need two sets of credentials, both free. They go in `.env`, which is git-ignored. Never commit them or paste them into an issue or a chat.
 
-**Windows (PowerShell)**
+### PayPal Sandbox (`PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`)
+
+1. Go to <https://developer.paypal.com/dashboard/> and log in with any PayPal account.
+2. Switch the toggle at the top right to **Sandbox**. Credentials from the **Live** side must never be used here, and the app refuses any host except `api-m.sandbox.paypal.com` (INV-12).
+3. Open **Apps & Credentials** and click **Create App**. Give it a name and choose the **Merchant** type.
+4. Open the new app and copy the **Client ID** and the **Secret** (click *Show* to reveal it). These are `PAYPAL_CLIENT_ID` and `PAYPAL_CLIENT_SECRET`.
+5. Make sure the app has the **Payouts** feature enabled. The app calls the Payouts API.
+6. Open **Testing Tools > Sandbox Accounts**. PayPal creates pre-seeded **Business** and **Personal** sandbox accounts for you.
+   - The **Business** account is the buyer who pays. Its balance must cover repeated $300 demo runs. Check it, and add sandbox funds if it is low.
+   - A **Personal** account is the contractor who gets paid. Put its email address in `DEMO_PAYEE_EMAIL_CORRECT`.
+   - For `DEMO_PAYEE_EMAIL_TYPO`, use the same address with one letter changed. There must be no sandbox account behind it.
+
+### Google Gemini (`LLM_API_KEY`)
+
+1. Go to <https://aistudio.google.com/apikey> and sign in with a Google account.
+2. Click **Create API key**, pick or create a project when asked, and copy the generated key. It starts with `AIza`.
+3. Put it in `LLM_API_KEY`. Set `LLM_MODEL` to `gemini-3.1-flash-lite`, the model this build was tested with. `.env.example` leaves `LLM_MODEL` blank, so you must fill it in.
+
+---
+
+## Local setup and running the demo
+
+Requirements: Python 3.11 or newer, plus the two sets of credentials above.
+
+The demo runs only on your own machine, at `http://127.0.0.1:8000`. It talks to the real PayPal Sandbox and the real Gemini API, so it needs an internet connection.
+
+**1. Clone the repository and create a virtual environment**
 
 ```powershell
+# Windows (PowerShell). `py -m venv` does the same as `python -m venv`; on Windows `python` can be a Store stub.
 py -m venv .venv
 .venv\Scripts\Activate.ps1
-pip install -r requirements.txt -r requirements-dev.txt
-Copy-Item .env.example .env      # then fill in the values below
-uvicorn app.main:app --port 8000 --workers 1
 ```
-
-**Linux or macOS**
 
 ```bash
+# Linux or macOS
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt -r requirements-dev.txt
-cp .env.example .env             # then fill in the values below
-uvicorn app.main:app --port 8000 --workers 1
 ```
 
-Open <http://localhost:8000>. A fresh start with no database creates the schema. Keep one worker: the gate's concurrency guarantees assume a single process next to SQLite.
+**2. Install the dependencies**
 
-### Hosted demo on Hugging Face Spaces
+```
+pip install -r requirements.txt
+pip install -r requirements-dev.txt     # only needed to run pytest
+```
 
-The hosted app runs as a **Docker Space on Hugging Face Spaces, free tier**, at `https://<username>-<space-name>.hf.space` (the real link replaces this placeholder once the Space is live).
+**3. Create `.env`**
 
-**Deployed as a Docker Space; the Dockerfile is a deploy wrapper only.** It is kept in a git-ignored deploy folder, not in this repository, so the repo itself stays free of Docker (PRD section 3.2). The app is the same single process as locally: `uvicorn app.main:app` with `--workers 1`, and every variable from the configuration table set as a Space secret or variable, with `DB_PATH` pointing under `/tmp`.
+Copy `.env.example` to `.env` (`Copy-Item .env.example .env` on Windows, `cp .env.example .env` elsewhere) and fill in at least:
 
-This deviates from PRD section 16 and UAT-HOST-04, which assume a paid Render instance.
+```
+PAYPAL_MODE=sandbox
+PAYPAL_BASE_URL=https://api-m.sandbox.paypal.com
+PAYPAL_CLIENT_ID=<from the PayPal dashboard>
+PAYPAL_CLIENT_SECRET=<from the PayPal dashboard>
+DEMO_PAYEE_EMAIL_CORRECT=<your sandbox personal account email>
+DEMO_PAYEE_EMAIL_TYPO=<the same address with one letter changed>
+LLM_MODE=live
+LLM_API_KEY=<your AIza... key>
+LLM_MODEL=gemini-3.1-flash-lite
+INVESTIGATOR_MODE=prefetch
+```
 
-What the free tier means for anyone trying the demo:
+The app has no `PAYPAL_ENV` setting. The sandbox choice is `PAYPAL_MODE=sandbox` together with the sandbox `PAYPAL_BASE_URL`. `INVESTIGATOR_MODE=prefetch` is recommended for the live demo: code reads the four PayPal tools once and the model makes a single call, which fits the 45 s budget more reliably than the default `tool_loop` when Gemini is slow. See the [configuration table](#configuration-env) for every variable.
 
-- **The Space sleeps after a period of inactivity.** The first request after that waits for a cold start, roughly 30 to 50 seconds. The page stays blank or loading until then. Please wait; a reload is not needed.
-- **The database does not survive a restart.** The SQLite file lives in `/tmp`, which is cleared whenever the Space restarts or wakes from sleep. The app then starts with an empty database and seeds **scenario A** (PRD section 16).
-- **So click "Reset demo (B)" after every wake-up or restart.** It reseeds scenario B, the primary demo, and gives a fresh run ID. Use "Reset demo (A)" for the alternate scenario.
-- **Nothing runs while the Space sleeps**, including the background status polling. A payout still in flight when the Space went to sleep is not synced, and the reset clears it with everything else.
-- **Money is never at risk from this.** Every payout is a PayPal sandbox payout. The sandbox keeps its own record, but the app's ledger and timeline start over.
+**4. Start the server**
+
+```powershell
+# Windows
+py -m uvicorn app.main:app --reload
+```
+
+```bash
+# Linux or macOS
+uvicorn app.main:app --reload
+```
+
+Keep it to one process, and do not add `--workers`: the gate's concurrency guarantees assume a single process next to SQLite. A fresh start with no database creates the schema and seeds scenario A. The server listens on `127.0.0.1:8000` by default.
+
+**5. Walk through Scenario B**
+
+Open <http://127.0.0.1:8000> and click **Reset demo (B)**. Then:
+
+1. On milestone 1, click the `m1_pass` fixture. The verifier returns `PASS` with cited facts.
+2. Click **Approve and pay**. The gate checks pass and the app creates a real sandbox payout. The simulated fault discards PayPal's response, so the ledger shows `UNKNOWN`.
+3. Click **Retry (same key)**. The retry reuses the same `sender_batch_id`, so PayPal answers with a link to the original batch and nothing is paid twice. The app opens a case.
+4. Click **Run AI investigator**. It reads live PayPal status and recommends `RECONCILE_MARK_PAID`. It is read-only and cannot move money.
+5. Click **Approve reconcile (mark paid)**. The gate does a fresh PayPal read first, and only then does the ledger become `PAID`.
+
+Nothing here is automatic. If a step is refused, the page shows the gate's checklist with the failing check.
+
+**6. Run the offline tests**
+
+```
+pytest -m "not sandbox and not llm" -q     # 553 passed
+```
+
+On Windows, use `py -m pytest` if `pytest` is not on the path. The other tiers are listed under [Tests](#tests).
 
 ### Configuration (`.env`)
 
@@ -203,21 +265,18 @@ What the free tier means for anyone trying the demo:
 | `DEMO_PAYEE_EMAIL_CORRECT` | | A sandbox personal account (the contractor) |
 | `DEMO_PAYEE_EMAIL_TYPO` | | The same address with one letter changed and no sandbox account behind it |
 | `LLM_MODE` | `live` | `live`, or `fake` for tests |
-| `LLM_API_KEY`, `LLM_MODEL` | `gemini-3.1-flash-lite` | A Google Gemini API key and model name |
+| `LLM_API_KEY`, `LLM_MODEL` | `gemini-3.1-flash-lite` | A Google Gemini API key and model name. `.env.example` leaves both blank |
 | `LLM_DAILY_CALL_CAP` | `300` | Not enforced in this build (PRD 14.1, cut 1) |
 | `INVESTIGATOR_MAX_STEPS` | `6` | Tool-call cap for the investigator |
 | `INVESTIGATOR_MODE` | `tool_loop` | `tool_loop` (default): the model calls the four read-only tools itself. `prefetch`: code calls all four once, then one model call (PRD 14.1 cut 4). Any other value keeps `tool_loop`. |
-| `DB_PATH` | `./data/synapsepay.db` | SQLite file |
+| `DB_PATH` | `./data/synapsepay.db` | SQLite file (git-ignored) |
 | `SYNC_LOOP_ENABLED` | `true` | Background status polling. Never touches `UNKNOWN` payouts. |
 | `SYNC_INTERVAL_SECONDS` | `5` | |
 | `UNCLAIMED_GRACE_SECONDS` | `600` | Age at which an unclaimed payout opens a case by itself |
 
-The sandbox setup needs:
-- a sandbox REST app with Payouts enabled;
-- a sandbox business account for the buyer, funded with enough USD for repeated $300 demo runs;
-- a sandbox personal account for the contractor.
+The sandbox needs a REST app with Payouts enabled, a funded business account for the buyer and a personal account for the contractor. See [How to get API keys](#how-to-get-api-keys).
 
-Check it with `python scripts/gate0.py` before anything else.
+Check the setup with `python scripts/gate0.py` before anything else.
 
 ### Tests
 
@@ -271,7 +330,7 @@ JSON over HTTP (PRD 12). Gate refusals return **409** with the full `GateResult`
 | Operator page (`app/static/`) | Done. Scenario B runs on it from reset to reconcile. The cancel and reissue buttons call routes that do not exist yet and show a "not available" message. |
 | `CANCEL` and `REISSUE` gates and routes (`POST /api/cases/{id}/actions/cancel` and `.../reissue`) | **Not built.** Scenario A currently ends at the investigator's `CANCEL_UNCLAIMED_AND_REISSUE` recommendation. The UAT-RES rows have no tests yet. |
 | `scripts/e2e.py` end-to-end runner (UAT-E2E) | **Not built** |
-| Deployment | Docker Space on Hugging Face Spaces (free). The Dockerfile is a deploy wrapper kept in a git-ignored deploy folder, so the repo has no deploy file. The hosted URL above is still a placeholder. |
+| Deployment | **None, by decision.** The app runs locally at `http://127.0.0.1:8000` with the live PayPal Sandbox and the live Gemini API. There is no hosted URL, no Docker and no deploy file in the repository. |
 
 Not built by decision (PRD 14.1, cut 1): reset-time cancel of unclaimed items, the `LLM_DAILY_CALL_CAP` limit, and an override control in the UI. The `override_reason` gate check and API stay.
 

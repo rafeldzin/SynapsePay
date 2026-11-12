@@ -546,7 +546,7 @@ Fill in during the sprint. One line per run is enough.
 | | Tier 2 | `pytest -m llm -q` (x3) | | | | | |
 | | Tier 3 | `pytest -m sandbox -q` | | | | | |
 | | Tier 4 local | `python scripts/e2e.py --scenario A` | | | | | |
-| | Tier 4 hosted | `python scripts/e2e.py --scenario A --base-url https://...` | | | | | |
+| | Tier 4 hosted | `python scripts/e2e.py --scenario A --base-url https://...` | | | Not run (local-only submission) | | |
 | | Tier 5 | Sections 11.1 to 11.3 | | | | | |
 
 | Decision | Value |
@@ -554,7 +554,7 @@ Fill in during the sprint. One line per run is enough.
 | On-camera scenario (A or B) | Scenario B (reconcile after uncertain send) |
 | `duplicate_behavior` from Gate 0 | `rejected_with_link` |
 | Cuts applied (PRD 14.1 numbers) | 1: active from the start (no reset-time cancel of unclaimed items, no `LLM_DAILY_CALL_CAP`, no override control in the UI; the override stays in the API). 4: opt-in fixed retrieval, `INVESTIGATOR_MODE=prefetch`, for live demo stability after `tool_loop` ran out of the 45 s budget on slow Gemini responses. `tool_loop` stays the default, so tier 1 (UAT-SEC-04, UAT-INV-05) runs unchanged |
-| Rows recorded as "not run" and why | UAT-API-07, UAT-API-08 (cut 1) |
-| Hosted URL | `https://<username>-<space-name>.hf.space` (placeholder until the Space is live; hosted on Hugging Face Spaces, Docker Space, free) |
+| Rows recorded as "not run" and why | UAT-API-07, UAT-API-08 (cut 1); UAT-HOST-01 to UAT-HOST-06 (local-only submission) |
+| Hosted URL | Not deployed (local execution at http://127.0.0.1:8000) |
 | Video URL | |
 | Submitted at | |

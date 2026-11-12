@@ -8,7 +8,7 @@ A business that pays contractors per milestone through PayPal hits two costly mo
 
 | | |
 |---|---|
-| Hosted demo | _added at deploy_ (no login; use the reset buttons in the header) |
+| Hosted demo | _added at deploy_ (no login; Render Free tier, so click **Reset demo (B)** after it wakes, see [Hosted demo on Render Free](#hosted-demo-on-render-free)) |
 | Demo video | _added at upload_ |
 | Specification | [`docs/PRD.md`](docs/PRD.md) (requirements) and [`docs/UAT.md`](docs/UAT.md) (acceptance tests) |
 | License | [MIT](LICENSE) |
@@ -110,24 +110,32 @@ The background status sync never touches an `UNKNOWN` payout (PRD 8.5), so nothi
 
 ## Gate 0: sandbox findings and the demo scenario
 
-Before building on the payment rail, `scripts/gate0.py` ran every PayPal call against the real sandbox with $1.00 payouts. Its output is committed as [`docs/gate0_result.json`](docs/gate0_result.json). The recorded run (`ran_at` 2026-11-12T15:13:32Z) passed all seven steps:
+Before building on the payment rail, `scripts/gate0.py` ran every PayPal call against the real sandbox with $1.00 payouts. Its output is committed as [`docs/gate0_result.json`](docs/gate0_result.json). The file currently holds the latest run (`ran_at` 2026-11-12T15:48:09Z), which passed all seven steps:
 
 | Step | Result recorded |
 |---|---|
 | UAT-G0-01 OAuth token | HTTP 200, host `api-m.sandbox.paypal.com` |
-| UAT-G0-02 Payout to a registered sandbox account | HTTP 201, batch `MP7ERHRE5EQF6` |
-| UAT-G0-03 Item reaches `SUCCESS` | after 18.0 s |
-| UAT-G0-04 Payout to an unregistered (mistyped) email | item `UNCLAIMED` after 18.1 s |
-| UAT-G0-05 Cancel the unclaimed item | HTTP 200, `transaction_status: RETURNED` |
+| UAT-G0-02 Payout to a registered sandbox account | HTTP 201, batch `UD9LY8VJ2WB4Y` |
+| UAT-G0-03 Item reaches `SUCCESS` | after 18.2 s |
+| UAT-G0-04 Payout to an unregistered (mistyped) email | item `UNCLAIMED` after 17.5 s |
+| UAT-G0-05 Cancel the unclaimed item | batch `SUCCESS` at the call, HTTP 200, `transaction_status: RETURNED` |
 | UAT-G0-06 Resend with the same `sender_batch_id` | HTTP 400 `USER_BUSINESS_ERROR` with a link to the original batch (`rejected_with_link`), no second payout |
 | UAT-G0-07 Cancel a `SUCCESS` item | HTTP 400 `ITEM_INCORRECT_STATUS` |
 
-**The cancel endpoint was not always this reliable.** Earlier probes by the team, before this recorded run, got HTTP 500 from `POST /v1/payments/payouts-item/{id}/cancel` on an `UNCLAIMED` item in a `SUCCESS` batch (PayPal `debug_id`s `f494683063fd6` and `f245215b1bd6e`). Those runs are not part of `gate0_result.json`. They are recorded in an earlier team branch.
+### History of the cancel call
+
+The cancel endpoint was not always this reliable. In order:
+
+1. **HTTP 500 probes (11 Nov, before `gate0_result.json` existed).** Early probes with `scripts/cancel_probe.py` on a team branch got HTTP 500 `INTERNAL_SERVICE_ERROR` from `POST /v1/payments/payouts-item/{id}/cancel` on `UNCLAIMED` items in a `SUCCESS` batch. The two PayPal `debug_id`s recorded at the time are `f494683063fd6` and `f245215b1bd6e`. That team branch was never merged into `main`, so those runs are not in `gate0_result.json`.
+2. **`gate0.py` run at 2026-11-12T15:13:32Z.** Cancel returned HTTP 200, `RETURNED`, with the batch `SUCCESS` at the time of the call.
+3. **`gate0.py` run at 2026-11-12T15:48:09Z** (the run in the file now). Cancel again returned HTTP 200, `RETURNED`, batch `SUCCESS` at the call.
+
+Both recorded runs are committed in the repository history. The team did not find the cause of the earlier 500s, which the old notes say also happened with the batch in `SUCCESS`, so a 5xx from this one call remains possible during a demo.
 
 **Why scenario B is the primary demo.**
 - **What Gate 0 alone says.** By the UAT decision table, a run where every step passes would put scenario A on camera.
-- **Why the team chose B anyway.** Scenario A's repair depends on that cancel call, which failed intermittently in earlier probes. Scenario B's money path depends only on calls that behaved consistently: create payout, the duplicate-key retry, and batch and item reads. B also shows the core promise directly. A lost response does not lead to a double payment, and the ledger is corrected only through a human-approved reconcile.
-- **Scenario A stays available** through the "Reset demo (A)" button.
+- **Why the team chose B anyway.** Scenario A's repair depends on that cancel call, the only PayPal call with a recorded 5xx in our testing. Scenario B's money path uses only calls that behaved consistently: create payout, the duplicate-key retry, and batch and item reads. B also shows the core promise directly. A lost response does not lead to a double payment, and the ledger is corrected only through a human-approved reconcile.
+- **Scenario A stays available** through the "Reset demo (A)" button. Its cancel and reissue steps are not built yet (see [Build status](#build-status-at-commit-63c88d2)), so it currently runs as far as the investigator's recommendation.
 
 | | Scenario B (primary) | Scenario A |
 |---|---|---|
@@ -166,6 +174,18 @@ uvicorn app.main:app --port 8000 --workers 1
 ```
 
 Open <http://localhost:8000>. A fresh start with no database creates the schema. Keep one worker: the gate's concurrency guarantees assume a single process next to SQLite.
+
+### Hosted demo on Render Free
+
+The hosted app runs on Render's **Free** web service tier. This deviates from PRD section 16, which assumes a paid instance (and UAT-HOST-04, which checks for one). Start command: `uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1`.
+
+What the Free tier means for anyone trying the demo:
+
+- **The instance sleeps after a period of inactivity.** The first request after that waits for a cold start, roughly 30 to 50 seconds. The page stays blank or loading until then. Please wait; a reload is not needed.
+- **The disk is ephemeral.** The SQLite database is lost whenever the instance restarts or wakes from sleep. The app then starts with an empty database and seeds **scenario A** (PRD section 16).
+- **So click "Reset demo (B)" after every wake-up or restart.** It reseeds scenario B, the primary demo, and gives a fresh run ID. Use "Reset demo (A)" for the alternate scenario.
+- **Nothing runs while the instance sleeps**, including the background status polling. A payout still in flight when the instance went to sleep is not synced, and the reset clears it with everything else.
+- **Money is never at risk from this.** Every payout is a PayPal sandbox payout. The sandbox keeps its own record, but the app's ledger and timeline start over.
 
 ### Configuration (`.env`)
 
@@ -233,20 +253,23 @@ JSON over HTTP (PRD 12). Gate refusals return **409** with the full `GateResult`
 
 ---
 
-## Build status at commit `871de93`
+## Build status at commit `63c88d2`
 
 | Area | Status |
 |---|---|
 | Contracts, fixtures, seed, deterministic facts, injection scan | Done |
 | Gemini adapter, verifier with deterministic post-processing | Done |
-| Investigator: read-only tools, bounded loop, post-processing | Done |
+| Investigator: read-only tools, bounded loop, post-processing, opt-in `prefetch` mode | Done |
 | Config, schema, append-only events, startup guard, PayPal client and fake | Done |
-| `PAY` and `RETRY` gates, executor, pay and retry routes | Done |
-| Operator page (`app/static/`) | Done. It needs the remaining routes below to run the demo. |
-| Status sync, detection rules D1 to D3 | In progress |
-| `CANCEL`, `REISSUE`, `RECONCILE` gates and routes, faults | In progress |
-| `/api/state`, reset, deliverable, messages, investigate routes, deploy | In progress |
-| `scripts/e2e.py` end-to-end runner | In progress |
+| `PAY`, `RETRY` and `RECONCILE` gates, executor, and the `timeout_after_send` and `timeout_before_send` demo faults | Done |
+| Status sync (with its background loop) and detection rules D1 to D4 | Done |
+| All 15 routes the primary demo uses: health, state, reset, arm-fault, deliverable, gate preview, pay, retry, messages, case detail, investigate, sync, recheck, reconcile | Done |
+| Operator page (`app/static/`) | Done. Scenario B runs on it from reset to reconcile. The cancel and reissue buttons call routes that do not exist yet and show a "not available" message. |
+| `CANCEL` and `REISSUE` gates and routes (`POST /api/cases/{id}/actions/cancel` and `.../reissue`) | **Not built.** Scenario A currently ends at the investigator's `CANCEL_UNCLAIMED_AND_REISSUE` recommendation. The UAT-RES rows have no tests yet. |
+| `scripts/e2e.py` end-to-end runner (UAT-E2E) | **Not built** |
+| Deployment | The repo has no deploy file. Per PRD 16 the Render service and its variables are set in the Render dashboard. The hosted URL above is still a placeholder. |
+
+Not built by decision (PRD 14.1, cut 1): reset-time cancel of unclaimed items, the `LLM_DAILY_CALL_CAP` limit, and an override control in the UI. The `override_reason` gate check and API stay.
 
 ---
 

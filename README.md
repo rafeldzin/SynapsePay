@@ -9,7 +9,7 @@ A business that pays contractors per milestone through PayPal hits two costly mo
 | | |
 |---|---|
 | How it runs | **Locally** at `http://127.0.0.1:8000`, connected to the live PayPal Sandbox and the live Gemini API. There is no hosted deployment. See [Local setup and running the demo](#local-setup-and-running-the-demo) |
-| Demo video | _added at upload_ |
+| Demo video | <https://youtu.be/bStxdWp-nIw> |
 | Specification | [`docs/PRD.md`](docs/PRD.md) (requirements) and [`docs/UAT.md`](docs/UAT.md) (acceptance tests) |
 | License | [MIT](LICENSE) |
 

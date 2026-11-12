@@ -556,5 +556,5 @@ Fill in during the sprint. One line per run is enough.
 | Cuts applied (PRD 14.1 numbers) | 1: active from the start (no reset-time cancel of unclaimed items, no `LLM_DAILY_CALL_CAP`, no override control in the UI; the override stays in the API). 4: opt-in fixed retrieval, `INVESTIGATOR_MODE=prefetch`, for live demo stability after `tool_loop` ran out of the 45 s budget on slow Gemini responses. `tool_loop` stays the default, so tier 1 (UAT-SEC-04, UAT-INV-05) runs unchanged |
 | Rows recorded as "not run" and why | UAT-API-07, UAT-API-08 (cut 1); UAT-HOST-01 to UAT-HOST-06 (local-only submission) |
 | Hosted URL | Not deployed (local execution at http://127.0.0.1:8000) |
-| Video URL | |
-| Submitted at | |
+| Video URL | https://youtu.be/bStxdWp-nIw |
+| Submitted at | 2026-11-13 02:57 WIB |

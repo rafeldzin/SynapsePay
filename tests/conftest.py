@@ -43,6 +43,30 @@ def fake_paypal():
     return reset_fake()
 
 
+def _seed(scenario: str) -> dict:
+    from app import db
+
+    conn = db.connect()
+    try:
+        if not db.schema_exists(conn):
+            db.init_schema(conn)
+        return db.reset_demo(conn, scenario)
+    finally:
+        conn.close()
+
+
+@pytest.fixture
+def seed_a():
+    """Resets the test database into scenario A (typo email). Returns {run_id, scenario}."""
+    return _seed("A")
+
+
+@pytest.fixture
+def seed_b():
+    """Resets the test database into scenario B (correct email, timeout_after_send armed)."""
+    return _seed("B")
+
+
 @pytest.fixture
 def approve():
     return {"approved_by": "ops-lead", "confirm": True}

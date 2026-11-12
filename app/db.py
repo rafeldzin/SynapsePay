@@ -1,4 +1,5 @@
 """SQLite access (PRD 4.4, 5): stdlib sqlite3, WAL, one connection per call, BEGIN IMMEDIATE for writes."""
+import secrets
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
@@ -55,6 +56,25 @@ def schema_exists(conn: sqlite3.Connection) -> bool:
     return conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'meta'"
     ).fetchone() is not None
+
+
+def reset_demo(conn: sqlite3.Connection, scenario: str) -> dict:
+    """Drops everything, then seeds `scenario` with a new run_id and the RESET event (PRD 13.4).
+
+    The reset route (A6) adds the best-effort cancel of unclaimed items in front of this.
+    """
+    from app import events, seed  # local: seed and events do not import db, this keeps db light
+
+    settings = get_settings()
+    run_id = secrets.token_hex(4)
+    reset(conn)
+    with tx(conn):
+        seed.seed_scenario(conn, scenario,
+                           payee_email_correct=settings.demo_payee_email_correct,
+                           payee_email_typo=settings.demo_payee_email_typo)
+        conn.execute("INSERT INTO meta (key, value) VALUES ('run_id', ?)", (run_id,))
+        events.append(conn, "RESET", "system", payload={"run_id": run_id, "scenario": scenario})
+    return {"run_id": run_id, "scenario": scenario}
 
 
 def reset(conn: sqlite3.Connection) -> None:

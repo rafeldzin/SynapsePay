@@ -1,23 +1,30 @@
 """F1 proof verifier: one model call bounded by deterministic rules (PRD 9.3, 9.4).
 
-`evaluate()` is the whole decision and touches no database. `verify(milestone_id)`,
-which loads the newest deliverable, stores the result and writes events, is added
-when Dev A's db.py and events.py land (package A1).
+`evaluate()` is the whole decision and touches no database. `submit()` stores a
+deliverable and calls `verify(milestone_id)`, which verifies the newest
+deliverable and stores the result on the milestone with its events. The
+deliverable route (POST /api/milestones/{id}/deliverable) calls `submit()` or
+`submit_fixture()` and maps LookupError to 404 and MilestoneLocked to 409.
 
 The model only ever sees the criteria, the computed facts and the report inside
 <untrusted_report> in the user turn. The CSV body is never sent (INV-8). Hard
 checks and the coverage rule can only make a verdict stricter (INV-9), and any
 model failure abstains with NEEDS_REVIEW (INV-10).
 """
+import hashlib
 import json
 import re
+import sqlite3
 from datetime import datetime, timezone
+from pathlib import Path
 
-from app import llm
+from app import db, events, llm
 from app.contracts import (ContradictedClaim, Criterion, CriterionVerdict, Fact,
                            InjectionFinding, Verdict, VerificationResult)
 from app.verify import checks, injection
 
+FIXTURES_DIR = Path(__file__).resolve().parents[2] / "fixtures"
+LOCKED_STATES = ("PAYOUT_IN_FLIGHT", "PAID")  # PRD 6.1: no new deliverable, HTTP 409
 LLM_TIMEOUT_S = 30
 MAX_REPORT_CHARS = 20_000  # what the model sees; the injection scan reads all of it
 MAX_CLAIM_CHARS = 200
@@ -229,3 +236,108 @@ def evaluate(*, milestone_id: str, criteria: list[Criterion], csv_bytes: bytes,
         llm_used=answer is not None,
         created_at=_now(),
     )
+
+
+# ---- storage (PRD 6.1, 9.4 last paragraph, 5.1 events) -------------------
+
+class MilestoneLocked(Exception):
+    """The milestone is PAYOUT_IN_FLIGHT or PAID, so no deliverable is accepted. HTTP 409."""
+
+
+def load_fixture(name: str) -> tuple[str, bytes, str]:
+    """(csv file name, CSV bytes, report text) of a seeded fixture from fixtures/manifest.json."""
+    manifest = json.loads((FIXTURES_DIR / "manifest.json").read_text(encoding="utf-8"))
+    entry = manifest["fixtures"].get(name)
+    if entry is None:
+        raise LookupError(f"unknown fixture {name!r}")
+    return (entry["csv_file"], (FIXTURES_DIR / entry["csv_file"]).read_bytes(),
+            (FIXTURES_DIR / entry["report_file"]).read_bytes().decode("utf-8"))
+
+
+def _milestone(conn: sqlite3.Connection, milestone_id: str) -> sqlite3.Row:
+    row = conn.execute("SELECT * FROM milestones WHERE id = ?", (milestone_id,)).fetchone()
+    if row is None:
+        raise LookupError(f"unknown milestone {milestone_id!r}")
+    return row
+
+
+def submit(milestone_id: str, *, csv_name: str, csv_bytes: bytes, report_text: str,
+           submitted_by: str) -> VerificationResult:
+    """Stores a deliverable, then verifies it. Raises LookupError or MilestoneLocked."""
+    conn = db.connect()
+    try:
+        with db.tx(conn):
+            milestone = _milestone(conn, milestone_id)
+            if milestone["state"] in LOCKED_STATES:
+                raise MilestoneLocked(f"milestone {milestone_id} is {milestone['state']}")
+            sha256 = hashlib.sha256(csv_bytes).hexdigest()
+            cursor = conn.execute(
+                "INSERT INTO deliverables (milestone_id, sha256, csv_name, csv_bytes, report_text, "
+                "submitted_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (milestone_id, sha256, csv_name, csv_bytes, report_text, submitted_by, _now()))
+            events.append(conn, "DELIVERABLE_SUBMITTED", f"human:{submitted_by}",
+                          contract_id=milestone["contract_id"], milestone_id=milestone_id,
+                          payload={"sha256": sha256, "csv_name": csv_name,
+                                   "deliverable_id": cursor.lastrowid})
+    finally:
+        conn.close()
+    return verify(milestone_id)
+
+
+def submit_fixture(milestone_id: str, fixture: str, *, submitted_by: str) -> VerificationResult:
+    """The JSON form of the deliverable route: {"fixture": "<name>", "submitted_by": ...}."""
+    csv_name, csv_bytes, report_text = load_fixture(fixture)
+    return submit(milestone_id, csv_name=csv_name, csv_bytes=csv_bytes,
+                  report_text=report_text, submitted_by=submitted_by)
+
+
+def verify(milestone_id: str) -> VerificationResult:
+    """Verifies the milestone's newest deliverable and stores the result (PRD 9).
+
+    The model call runs outside any write transaction. A new verdict replaces the
+    previous one and clears any override (PRD 6.1).
+    """
+    conn = db.connect()
+    try:
+        milestone = _milestone(conn, milestone_id)
+        deliverable = conn.execute(
+            "SELECT * FROM deliverables WHERE milestone_id = ? ORDER BY id DESC LIMIT 1",
+            (milestone_id,)).fetchone()
+        if deliverable is None:
+            raise LookupError(f"milestone {milestone_id} has no deliverable")
+        criteria = [Criterion.model_validate(c) for c in json.loads(milestone["criteria_json"])]
+        result = evaluate(milestone_id=milestone_id, criteria=criteria,
+                          csv_bytes=bytes(deliverable["csv_bytes"]),
+                          report_text=deliverable["report_text"])
+        with db.tx(conn):
+            milestone = _milestone(conn, milestone_id)  # re-read under the write lock
+            if milestone["state"] in LOCKED_STATES:
+                raise MilestoneLocked(f"milestone {milestone_id} is {milestone['state']}")
+            _record(conn, milestone, result)
+    finally:
+        conn.close()
+    return result
+
+
+def _record(conn: sqlite3.Connection, milestone: sqlite3.Row, result: VerificationResult) -> None:
+    ids = {"contract_id": milestone["contract_id"], "milestone_id": milestone["id"]}
+    events.append(conn, "FACTS_COMPUTED", "system", **ids,
+                  payload={"deliverable_sha256": result.deliverable_sha256,
+                           "facts": {fact.id: fact.value for fact in result.facts}})
+    if result.injection_detected:
+        events.append(conn, "INJECTION_FLAGGED", "system", **ids,
+                      payload={"findings": [f.model_dump() for f in result.injection_findings]})
+    events.append(conn, "VERDICT_RECORDED", "ai:verifier" if result.llm_used else "system", **ids,
+                  payload={"overall": result.overall,
+                           "overall_capped_by": result.overall_capped_by,
+                           "downgraded_by": {c.criterion_id: c.downgraded_by
+                                             for c in result.criteria if c.downgraded_by},
+                           "llm_used": result.llm_used,
+                           "deliverable_sha256": result.deliverable_sha256})
+    conn.execute(
+        "UPDATE milestones SET verdict = ?, verification_json = ?, state = ?, "
+        "override_reason = NULL, override_by = NULL, updated_at = ? WHERE id = ?",
+        (result.overall, result.model_dump_json(), result.overall, _now(), milestone["id"]))
+    if milestone["state"] != result.overall:
+        events.append(conn, "MILESTONE_STATE_CHANGED", "system", **ids,
+                      payload={"from": milestone["state"], "to": result.overall})

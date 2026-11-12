@@ -7,15 +7,14 @@ to the policy gate, never a trigger: nothing here can write to PayPal (INV-3).
 Any model failure escalates to a human with the evidence attached (INV-10).
 
 `evaluate_case()` decides and only reads the database. `record_investigation()`
-stores the report and writes the events. `investigate(case_id)` joins the two on
-Dev A's db.py and events.py once they exist (package A1).
+stores the report and writes the events. `investigate(case_id)` joins the two.
 """
 import os
 import sqlite3
 from datetime import datetime, timezone
 from typing import Any, Callable, get_args
 
-from app import llm
+from app import db, events, llm
 from app.contracts import (ActionCode, Evidence, Hypothesis, HypothesisCode,
                            InvestigationReport)
 from app.investigate.tools import LIVE_STATES, TOOL_DEFINITIONS, CaseTools
@@ -278,24 +277,13 @@ def record_investigation(conn: sqlite3.Connection, report: InvestigationReport, 
 
 
 def investigate(case_id: str) -> InvestigationReport:
-    """POST /api/cases/{id}/investigate. Wiring to Dev A's modules (package A1).
-
-    Assumes db.connect() -> sqlite3.Connection and events.append(conn, *, type,
-    actor, case_id, payout_id, milestone_id, paypal_batch_id, paypal_item_id,
-    payload). Adjust the two lines below if A1 settles on other signatures.
-    """
-    from app import db, events
-
+    """POST /api/cases/{id}/investigate. The route maps LookupError to 404 and
+    CaseNotInvestigable to 409."""
     conn = db.connect()
     try:
         report = evaluate_case(conn, case_id)  # model time, no write lock held
-        conn.execute("BEGIN IMMEDIATE")
-        try:
+        with db.tx(conn):
             record_investigation(conn, report, append_event=events.append)
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
     finally:
         conn.close()
     return report

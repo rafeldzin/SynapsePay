@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SynapsePay Operator Console</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">SynapsePay</span>
+    <span class="sandbox">SANDBOX, no real money</span>
+  </div>
+  <div class="runinfo">
+    Run <code id="run-id">-</code>
+    <span class="sep">·</span> Scenario <strong id="scenario">-</strong>
+    <span class="sep">·</span> PayPal <span id="paypal-mode">-</span>
+    <span class="sep">·</span> LLM <span id="llm-mode">-</span>
+  </div>
+  <div class="controls">
+    <label class="operator">Operator <input id="operator" value="ops-lead" size="10" autocomplete="off"></label>
+    <button id="reset-b" class="primary" type="button">Reset demo (B)</button>
+    <button id="reset-a" type="button">Reset demo (A)</button>
+  </div>
+</header>
+
+<div id="banners"></div>
+
+<main class="layout">
+  <section id="contract" class="panel">
+    <h2>Contract <span class="tag seeded">Seeded</span></h2>
+    <div id="contract-body" class="muted">Loading…</div>
+  </section>
+
+  <section id="milestones" class="panel wide">
+    <h2>Milestones</h2>
+    <div id="milestones-body"></div>
+  </section>
+
+  <section id="ledger" class="panel wide">
+    <h2>Payout ledger <span class="tag real">PayPal sandbox values</span></h2>
+    <div id="ledger-body"></div>
+  </section>
+
+  <section id="inbox" class="panel">
+    <h2>Inbox <span class="tag simulated">Simulated</span></h2>
+    <p class="hint">Type a message as if the contractor sent it. No email is received or sent.</p>
+    <form id="inbox-form" autocomplete="off">
+      <label>From <input id="inbox-from" type="email" required placeholder="contractor@example.com"></label>
+      <label>Message <textarea id="inbox-text" rows="3" required placeholder="Hi, the milestone 1 payment never arrived…"></textarea></label>
+      <button type="submit">Add simulated message</button>
+    </form>
+    <div id="inbox-notice"></div>
+    <div id="inbox-body"></div>
+  </section>
+
+  <section id="cases" class="panel wide">
+    <h2>Exception cases</h2>
+    <div id="cases-body"></div>
+  </section>
+
+  <section id="timeline" class="panel wide">
+    <h2>Timeline <span class="tag">append-only event ledger, oldest first</span></h2>
+    <div id="timeline-body" class="timeline"></div>
+  </section>
+</main>
+
+<footer class="legend">
+  <strong>What is real here.</strong>
+  <span><span class="tag real">Real PayPal sandbox</span> OAuth token, create payout, batch and item reads, cancel unclaimed item. Every PayPal status, ID and amount shown comes from a stored PayPal response.</span>
+  <span><span class="tag seeded">Seeded</span> Buyer Lumen Studio, contractor Dewi, the contract, and the deliverable fixtures.</span>
+  <span><span class="tag simulated">Simulated</span> Contractor messages typed into the inbox, the "confirmed by phone" checkbox, and the lost PayPal response in scenario B.</span>
+  <span>Nothing is authorized, held or pooled: the buyer's own sandbox account pays the contractor directly. No login.</span>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>

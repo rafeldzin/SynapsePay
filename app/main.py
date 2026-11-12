@@ -15,7 +15,9 @@ from app import db, events
 from app.config import get_settings, load_env_file
 from app.contracts import GateResult
 from app.gate import executor, policy
+from app.cases import detect
 from app.investigate import investigator
+from app.paypal import sync
 from app.verify import verifier
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -34,7 +36,10 @@ async def lifespan(app: FastAPI):
         executor.recover_creating(conn)  # a CREATING row older than 60 s becomes UNKNOWN (PRD 6.2)
     finally:
         conn.close()
+    if get_settings().sync_loop_enabled:
+        sync.start_loop()  # polls SENT and UNCLAIMED payouts; never touches UNKNOWN (PRD 8.5)
     yield
+    sync.stop_loop()
 
 
 app = FastAPI(title="SynapsePay", lifespan=lifespan)
@@ -255,6 +260,57 @@ def get_case(case_id: str):
         case["report"] = _load(case.pop("report_json"))
         case["events"] = events.list_events(conn, case_id=case_id)
         return case
+    finally:
+        conn.close()
+
+
+class MessageBody(_Body):
+    contract_id: str
+    from_email: str
+    body: str
+
+
+@app.post("/api/messages")
+def post_message(body: MessageBody):
+    """Stores an inbound contractor message (simulated in the demo) and applies rule D1."""
+    conn = db.connect()
+    try:
+        with db.tx(conn):
+            return detect.on_message(conn, body.contract_id, body.from_email, body.body)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    finally:
+        conn.close()
+
+
+@app.post("/api/payouts/{payout_id}/sync")
+def sync_one_payout(payout_id: str):
+    try:
+        return {"payout": sync.sync_payout(payout_id)}
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@app.post("/api/sync")
+def sync_everything():
+    return {"synced": sync.sync_all()}
+
+
+@app.post("/api/cases/{case_id}/actions/recheck")
+def recheck_case(case_id: str):
+    """Read-only: a fresh status sync of the case's payout. A claimed payout resolves the case."""
+    conn = db.connect()
+    try:
+        case = conn.execute("SELECT payout_id FROM cases WHERE id = ?", (case_id,)).fetchone()
+    finally:
+        conn.close()
+    if case is None:
+        raise HTTPException(status_code=404, detail=f"unknown case {case_id!r}")
+    payout = sync.sync_payout(case["payout_id"])
+    conn = db.connect()
+    try:
+        return {"payout": payout, "case": _case_view(dict(conn.execute(
+            "SELECT * FROM cases WHERE id = ?", (case_id,)).fetchone()))}
     finally:
         conn.close()
 

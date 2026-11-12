@@ -44,9 +44,11 @@ def test_uat_arch_05_the_llm_sdk_is_imported_only_by_llm_py():
     assert importers == ["app/llm.py"]
 
 
-def test_a_arch_paypal_reads_is_imported_only_by_investigate_tools_and_the_policy_gate():
+def test_a_arch_paypal_reads_is_imported_only_by_investigate_tools_policy_and_sync():
+    # PRD 8.5 makes paypal/sync.py read the batch, so sync.py joins the two modules named in AGENTS.md
+    # (agreed with Dev B). Reads are read-only, so INV-2 and INV-3 are unaffected.
     importers = sorted(rel(p) for p, found in modules().items() if "app.paypal.reads" in found)
-    assert importers == ["app/gate/policy.py", "app/investigate/tools.py"]
+    assert importers == ["app/gate/policy.py", "app/investigate/tools.py", "app/paypal/sync.py"]
 
 
 def test_a_arch_the_policy_gate_and_paypal_package_never_import_llm_or_investigators():

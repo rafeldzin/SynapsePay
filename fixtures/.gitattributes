@@ -1,0 +1,5 @@
+# manifest.json records the SHA-256 of the raw fixture bytes.
+# Never let git convert line endings here (core.autocrlf would break the hashes).
+*.csv  -text
+*.md   -text
+*.json -text

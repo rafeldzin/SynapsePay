@@ -553,7 +553,7 @@ Fill in during the sprint. One line per run is enough.
 |---|---|
 | On-camera scenario (A or B) | |
 | `duplicate_behavior` from Gate 0 | |
-| Cuts applied (PRD 14.1 numbers) | |
+| Cuts applied (PRD 14.1 numbers) | 1: active from the start (no reset-time cancel of unclaimed items, no `LLM_DAILY_CALL_CAP`, no override control in the UI; the override stays in the API). 4: opt-in fixed retrieval, `INVESTIGATOR_MODE=prefetch`, for live demo stability after `tool_loop` ran out of the 45 s budget on slow Gemini responses. `tool_loop` stays the default, so tier 1 (UAT-SEC-04, UAT-INV-05) runs unchanged |
 | Rows recorded as "not run" and why | |
 | Hosted URL | |
 | Video URL | |

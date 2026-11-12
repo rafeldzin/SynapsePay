@@ -223,6 +223,7 @@ docs/PRD.md, docs/UAT.md, docs/gate0_result.json
 | `LLM_API_KEY`, `LLM_MODEL` | | |
 | `LLM_DAILY_CALL_CAP` | `300` | Over the cap, AI components abstain (INV-10) |
 | `INVESTIGATOR_MAX_STEPS` | `6` | Tool-call cap |
+| `INVESTIGATOR_MODE` | `tool_loop` | `tool_loop` (default) or `prefetch`. `prefetch` applies cut 4 (section 14.1): code calls the four tools once, then one `complete_json`. Any other value keeps `tool_loop` |
 | `DB_PATH` | `./data/synapsepay.db` | |
 | `SYNC_LOOP_ENABLED` | `true` | `false` in tests |
 | `SYNC_INTERVAL_SECONDS` | `5` | |

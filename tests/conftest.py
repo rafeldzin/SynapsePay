@@ -26,6 +26,9 @@ TYPO_EMAIL = "dewi.lestary@example.test"
 @pytest.fixture(autouse=True)
 def tier1_env(tmp_path, monkeypatch):
     # LLM_MODE is owned by _llm_tier below, so tier 2 can run the live model.
+    # App startup must not copy the developer's real .env into os.environ: a value such as
+    # INVESTIGATOR_MODE=prefetch would leak into every later test. Tests set what they need.
+    monkeypatch.setattr("app.main.load_env_file", lambda *args, **kwargs: None)
     monkeypatch.setenv("DB_PATH", str(tmp_path / "test.db"))
     monkeypatch.setenv("SYNC_LOOP_ENABLED", "false")
     monkeypatch.setenv("UNCLAIMED_GRACE_SECONDS", "600")

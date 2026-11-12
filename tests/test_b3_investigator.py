@@ -871,3 +871,34 @@ def test_b3_prefetch_system_prompt_says_the_tools_already_ran(conn, reads, fake_
     system = fake_llm.calls[0]["system"]
     assert "<evidence>" in system and "already" in system
     assert "CANCEL_UNCLAIMED_AND_REISSUE" in system and "<untrusted_message>" in system
+
+
+# --------------------------------------------------------------------------
+# test isolation: a developer's .env must never select the mode in Tier 1
+# --------------------------------------------------------------------------
+
+def test_b3_dotenv_loaded_by_app_startup_cannot_switch_the_mode(conn, reads, fake_llm, tmp_path):
+    """app.main's lifespan calls config.load_env_file(), which copies .env into
+    os.environ for the rest of the pytest process. conftest pins the mode first,
+    and load_env_file never overrides a variable that is already set."""
+    from app import config
+
+    dotenv = tmp_path / ".env"
+    dotenv.write_text("INVESTIGATOR_MODE=prefetch\n", encoding="utf-8")
+    scenario_a(conn, reads)
+
+    config.load_env_file(dotenv)
+    report = _investigate(conn, reads)
+
+    assert report.mode == "tool_loop"
+    assert _kinds(fake_llm) == ["tool_loop"]
+
+
+def test_b3_mode_set_explicitly_by_a_test_is_honoured(conn, reads, fake_llm, monkeypatch):
+    monkeypatch.setenv("INVESTIGATOR_MODE", "prefetch")
+    scenario_a(conn, reads)
+
+    report = _investigate(conn, reads)
+
+    assert report.mode == "prefetch" and report.steps_used == 4
+    assert _kinds(fake_llm) == ["complete_json"]

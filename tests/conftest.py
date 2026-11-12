@@ -97,6 +97,18 @@ def _dotenv_llm_settings() -> dict[str, str]:
 
 
 @pytest.fixture(autouse=True)
+def _investigator_mode(monkeypatch):
+    """Tier 1 runs the default tool loop whatever the developer's .env says.
+
+    app.main's startup calls config.load_env_file(), which copies .env into
+    os.environ for the rest of the pytest process. It never overrides a variable
+    that is already set, so pinning the mode here keeps INVESTIGATOR_MODE=prefetch
+    from leaking in. A test that wants prefetch sets it itself with monkeypatch.
+    """
+    monkeypatch.setenv("INVESTIGATOR_MODE", "tool_loop")
+
+
+@pytest.fixture(autouse=True)
 def _llm_tier(request, monkeypatch):
     if request.node.get_closest_marker("llm"):
         for key, value in _dotenv_llm_settings().items():

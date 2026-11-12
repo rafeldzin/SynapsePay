@@ -205,7 +205,7 @@ Check it with `python scripts/gate0.py` before anything else.
 | 3 | Real sandbox suite | `pytest -m sandbox -q` | PayPal sandbox credentials |
 
 At the time of writing:
-- **Tier 1:** 463 tests, all passing.
+- **Tier 1:** 553 tests, all passing.
 - **Tier 2:** 9 tests: the verifier on the four fixtures, the tool loop, and the investigator on scenarios A and B in both modes. These need a model that is reachable at the time. When Gemini returns 503 or 504 under load, the verifier abstains as INV-10 requires, and the live tests report that as a failure rather than a pass.
 - **Tier 3:** no `sandbox` tests are in the repository yet. Gate 0 is the real-sandbox check.
 

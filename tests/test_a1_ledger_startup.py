@@ -155,10 +155,11 @@ def test_uat_arch_06_startup_refuses_a_non_sandbox_host(monkeypatch):
             pytest.fail("the app must not start")
 
 
-def test_a1_health_reports_modes_on_a_fresh_database(client):
+def test_a1_health_reports_modes_and_a_fresh_database_boots_into_scenario_a(client):
+    # UAT-API-04 supersedes the A1 assumption of an empty database: no file means scenario A is seeded.
     body = client.get("/api/health").json()
-    assert body == {"ok": True, "run_id": None, "scenario": None,
-                    "paypal_mode": "fake", "llm_mode": "fake"}
+    assert body["ok"] is True and body["scenario"] == "A" and len(body["run_id"]) == 8
+    assert (body["paypal_mode"], body["llm_mode"]) == ("fake", "fake")
 
 
 def test_a1_startup_creates_the_schema_when_no_database_exists(client, tmp_path):

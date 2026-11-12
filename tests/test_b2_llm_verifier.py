@@ -611,6 +611,25 @@ def test_b2_gemini_does_not_retry_without_time_left_for_another_attempt(no_retry
     assert len(gemini.client.models.timeouts_ms) == 1
 
 
+def test_b2_gemini_deadline_is_never_below_googles_minimum(no_retry_delay):
+    """Gemini answers 400 INVALID_ARGUMENT to a deadline under 10 s (seen live by Dev A)."""
+    from types import SimpleNamespace
+
+    gemini = _gemini([SimpleNamespace(text="{}")], budget_s=3)
+
+    gemini.complete_json(system="s", user="u", schema={})
+
+    assert gemini.client.models.timeouts_ms == [llm.MIN_DEADLINE_S * 1000] == [10_000]
+
+
+def test_b2_gemini_retries_only_when_a_full_minimum_deadline_fits(no_retry_delay):
+    gemini = _gemini([_ProviderError(503), _ProviderError(503)], budget_s=9)
+
+    with pytest.raises(_ProviderError):
+        gemini.complete_json(system="s", user="u", schema={})
+    assert len(gemini.client.models.timeouts_ms) == 1
+
+
 def test_b2_gemini_retries_share_one_time_budget(no_retry_delay):
     from types import SimpleNamespace
 

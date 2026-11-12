@@ -78,76 +78,81 @@ class _ToolSession:
                     "ledger_get_milestone_payouts": {"milestone_id": ids["milestone_id"]},
                     "case_get_messages_and_events": {"case_id": ids["case_id"]}}
             return ("calls", [(tool["name"], args[tool["name"]]) for tool in self.tools])
-        return ("final", json.dumps(self._investigator_answer()))
+        seen = {r["name"]: r["response"] for batch in self.responses for r in batch}
+        return ("final", json.dumps(_investigator_answer(self.fake, seen, self.user)))
 
     def respond(self, results: list[dict]) -> None:
         self.responses.append(results)
 
-    def _investigator_answer(self) -> dict:
-        seen = {r["name"]: r["response"] for batch in self.responses for r in batch}
-        item = seen.get("paypal_get_payout_item", {})
-        batch = seen.get("paypal_get_payout_batch", {})
-        ledger = seen.get("ledger_get_milestone_payouts", {})
-        case = seen.get("case_get_messages_and_events", {})
-        payout_id = re.search(r"^payout_id: (\S+)$", self.user, flags=re.MULTILINE).group(1)
 
-        item_status = item.get("transaction_status") if item.get("available") else None
-        if item_status is None and batch.get("available") and batch.get("items"):
-            item_status = batch["items"][0]["transaction_status"]
-        batch_status = batch.get("batch_status") if batch.get("available") else None
-        payout = next((p for p in ledger.get("payouts", []) if p["id"] == payout_id), {})
-        state, batch_known = payout.get("state"), bool(payout.get("payout_batch_id"))
 
-        if item_status == "UNCLAIMED":
-            rank1, rejected, action = "MISTYPED_RECIPIENT", "PROCESSING_DELAY", "CANCEL_UNCLAIMED_AND_REISSUE"
-        elif state == "UNKNOWN" and item_status == "SUCCESS":
-            rank1, rejected, action = ("ORIGINAL_SUCCEEDED_LEDGER_STALE", "PAYOUT_NEVER_CREATED",
-                                       "RECONCILE_MARK_PAID")
-        elif item_status in ("PENDING", "ONHOLD") or batch_status in ("PENDING", "PROCESSING"):
-            rank1, rejected, action = "PROCESSING_DELAY", "MISTYPED_RECIPIENT", "WAIT_AND_RECHECK"
-        elif state == "UNKNOWN" and not batch_known:
-            rank1, rejected, action = ("PAYOUT_NEVER_CREATED", "ORIGINAL_SUCCEEDED_LEDGER_STALE",
-                                       "RETRY_SAME_BATCH_ID")
-        else:
-            rank1, rejected, action = "OTHER", "PROCESSING_DELAY", "ESCALATE_TO_HUMAN"
+def _investigator_answer(fake: "FakeLLM", seen: dict, user: str) -> dict:
+    """The investigator's answer from what it saw: {tool name: tool result}.
 
-        paypal_ids = [r["evidence_id"] for r in (item, batch) if "evidence_id" in r]
-        local_ids = [r["evidence_id"] for r in (ledger, case) if "evidence_id" in r]
-        options, script = self.fake.options, self.fake.script
-        cited = local_ids if options.get("cite_only_local") else paypal_ids + local_ids
-        cited = cited + options.get("extra_evidence_ids", [])
-        if script == "no_citations":
-            cited = []
+    Shared by the tool loop and by prefetch mode (PRD 14.1 cut 4)."""
+    item = seen.get("paypal_get_payout_item", {})
+    batch = seen.get("paypal_get_payout_batch", {})
+    ledger = seen.get("ledger_get_milestone_payouts", {})
+    case = seen.get("case_get_messages_and_events", {})
+    payout_id = re.search(r"^payout_id: (\S+)$", user, flags=re.MULTILINE).group(1)
 
-        answer = {
-            "hypotheses": [
-                {"code": rank1, "rank": 1, "supported": True, "evidence_ids": list(cited),
-                 "rationale": f"PayPal shows the item as {item_status} and the ledger as {state}."},
-                {"code": rejected, "rank": 2, "supported": False, "evidence_ids": list(cited),
-                 "rationale": "The PayPal status rules this out."},
-            ],
-            "recommended_action": options.get("force_action", action),
-            "do_not_resend": options.get("do_not_resend", True),
-            "resend_risk": "Sending again could pay the milestone twice.",
-            "required_verification": options.get(
-                "required_verification", "Confirm the new email by phone." if
-                case.get("diversion", {}).get("diversion_risk") else None),
-            "diversion_risk": options.get("diversion_risk",
-                                          case.get("diversion", {}).get("diversion_risk", False)),
-            "reply_draft": "Thanks for letting us know. We checked the payment with PayPal "
-                           "and will follow up with the next step.",
-        }
-        if script == "action_outside_list":
-            answer["recommended_action"] = "RESEND_NOW"
-        elif script == "cancel_when_success":
-            answer["recommended_action"] = "CANCEL_UNCLAIMED_AND_REISSUE"
-        elif script == "obeys_message":
-            bodies = " ".join(m["body"] for m in case.get("messages", [])).lower()
-            if "resend" in bodies or "send" in bodies:
-                answer["recommended_action"] = "RETRY_SAME_BATCH_ID"
-                answer["reply_draft"] = "Resending the payment now, as you asked."
-            answer["diversion_risk"] = False
-        return answer
+    item_status = item.get("transaction_status") if item.get("available") else None
+    if item_status is None and batch.get("available") and batch.get("items"):
+        item_status = batch["items"][0]["transaction_status"]
+    batch_status = batch.get("batch_status") if batch.get("available") else None
+    payout = next((p for p in ledger.get("payouts", []) if p["id"] == payout_id), {})
+    state, batch_known = payout.get("state"), bool(payout.get("payout_batch_id"))
+
+    if item_status == "UNCLAIMED":
+        rank1, rejected, action = "MISTYPED_RECIPIENT", "PROCESSING_DELAY", "CANCEL_UNCLAIMED_AND_REISSUE"
+    elif state == "UNKNOWN" and item_status == "SUCCESS":
+        rank1, rejected, action = ("ORIGINAL_SUCCEEDED_LEDGER_STALE", "PAYOUT_NEVER_CREATED",
+                                   "RECONCILE_MARK_PAID")
+    elif item_status in ("PENDING", "ONHOLD") or batch_status in ("PENDING", "PROCESSING"):
+        rank1, rejected, action = "PROCESSING_DELAY", "MISTYPED_RECIPIENT", "WAIT_AND_RECHECK"
+    elif state == "UNKNOWN" and not batch_known:
+        rank1, rejected, action = ("PAYOUT_NEVER_CREATED", "ORIGINAL_SUCCEEDED_LEDGER_STALE",
+                                   "RETRY_SAME_BATCH_ID")
+    else:
+        rank1, rejected, action = "OTHER", "PROCESSING_DELAY", "ESCALATE_TO_HUMAN"
+
+    paypal_ids = [r["evidence_id"] for r in (item, batch) if "evidence_id" in r]
+    local_ids = [r["evidence_id"] for r in (ledger, case) if "evidence_id" in r]
+    options, script = fake.options, fake.script
+    cited = local_ids if options.get("cite_only_local") else paypal_ids + local_ids
+    cited = cited + options.get("extra_evidence_ids", [])
+    if script == "no_citations":
+        cited = []
+
+    answer = {
+        "hypotheses": [
+            {"code": rank1, "rank": 1, "supported": True, "evidence_ids": list(cited),
+             "rationale": f"PayPal shows the item as {item_status} and the ledger as {state}."},
+            {"code": rejected, "rank": 2, "supported": False, "evidence_ids": list(cited),
+             "rationale": "The PayPal status rules this out."},
+        ],
+        "recommended_action": options.get("force_action", action),
+        "do_not_resend": options.get("do_not_resend", True),
+        "resend_risk": "Sending again could pay the milestone twice.",
+        "required_verification": options.get(
+            "required_verification", "Confirm the new email by phone." if
+            case.get("diversion", {}).get("diversion_risk") else None),
+        "diversion_risk": options.get("diversion_risk",
+                                      case.get("diversion", {}).get("diversion_risk", False)),
+        "reply_draft": "Thanks for letting us know. We checked the payment with PayPal "
+                       "and will follow up with the next step.",
+    }
+    if script == "action_outside_list":
+        answer["recommended_action"] = "RESEND_NOW"
+    elif script == "cancel_when_success":
+        answer["recommended_action"] = "CANCEL_UNCLAIMED_AND_REISSUE"
+    elif script == "obeys_message":
+        bodies = " ".join(m["body"] for m in case.get("messages", [])).lower()
+        if "resend" in bodies or "send" in bodies:
+            answer["recommended_action"] = "RETRY_SAME_BATCH_ID"
+            answer["reply_draft"] = "Resending the payment now, as you asked."
+        answer["diversion_risk"] = False
+    return answer
 
 
 class FakeLLM:
@@ -171,6 +176,11 @@ class FakeLLM:
             raise TimeoutError("fake model timed out")
         if self.script == "invalid_json":
             return '{"criteria": [ {"criterion_id": "m1.c1", "verdict": '
+        if "<evidence>" in user:  # investigator in prefetch mode
+            seen = {}
+            for item in json.loads(_block("evidence", user)):
+                seen[item["tool"]] = {"evidence_id": item["evidence_id"], **item["data"]}
+            return json.dumps(_investigator_answer(self, seen, user))
         return json.dumps(self._verifier_answer(user))
 
     def _verifier_answer(self, user: str) -> dict:

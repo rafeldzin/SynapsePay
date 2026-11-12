@@ -55,6 +55,8 @@ One Python process (FastAPI, one uvicorn worker), SQLite through the standard li
   - the action disagrees with the newest PayPal status.
 
   The diversion-risk flag and "do not resend" are set by code, not by the model.
+
+  With `INVESTIGATOR_MODE=prefetch` the retrieval is fixed: code calls the same four tools once and sends their results to the model in a single call. The same evidence rules and post-processing apply.
 - **Neither can write.** `app/verify/`, `app/investigate/` and `app/llm.py` never import `paypal.writes`, `paypal.http` or the executor. Tier 1 tests check these imports.
 
 ---
@@ -180,6 +182,7 @@ Open <http://localhost:8000>. A fresh start with no database creates the schema.
 | `LLM_API_KEY`, `LLM_MODEL` | `gemini-3.1-flash-lite` | A Google Gemini API key and model name |
 | `LLM_DAILY_CALL_CAP` | `300` | Not enforced in this build (PRD 14.1, cut 1) |
 | `INVESTIGATOR_MAX_STEPS` | `6` | Tool-call cap for the investigator |
+| `INVESTIGATOR_MODE` | `tool_loop` | `tool_loop` (default): the model calls the four read-only tools itself. `prefetch`: code calls all four once, then one model call (PRD 14.1 cut 4). Any other value keeps `tool_loop`. |
 | `DB_PATH` | `./data/synapsepay.db` | SQLite file |
 | `SYNC_LOOP_ENABLED` | `true` | Background status polling. Never touches `UNKNOWN` payouts. |
 | `SYNC_INTERVAL_SECONDS` | `5` | |
@@ -201,9 +204,9 @@ Check it with `python scripts/gate0.py` before anything else.
 | 2 | Verifier and tool loop against the live model | `pytest -m llm -q` | `LLM_API_KEY` and `LLM_MODEL` in `.env` |
 | 3 | Real sandbox suite | `pytest -m sandbox -q` | PayPal sandbox credentials |
 
-At commit `871de93`:
-- **Tier 1:** 447 tests, all passing.
-- **Tier 2:** 5 tests. These need a model that is reachable at the time. When Gemini returns 503 or 504 under load, the verifier abstains as INV-10 requires, and the live tests report that as a failure rather than a pass.
+At the time of writing:
+- **Tier 1:** 463 tests, all passing.
+- **Tier 2:** 9 tests: the verifier on the four fixtures, the tool loop, and the investigator on scenarios A and B in both modes. These need a model that is reachable at the time. When Gemini returns 503 or 504 under load, the verifier abstains as INV-10 requires, and the live tests report that as a failure rather than a pass.
 - **Tier 3:** no `sandbox` tests are in the repository yet. Gate 0 is the real-sandbox check.
 
 On Windows, use `py -m pytest` if `pytest` is not on the path.

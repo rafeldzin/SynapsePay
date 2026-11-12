@@ -248,3 +248,18 @@ def test_b3_investigate_unknown_case_raises_lookup_error(fake_paypal, fake_llm):
     scenario_a_case(fake_paypal)
     with pytest.raises(LookupError):
         investigator.investigate("case_ffffffff")
+
+
+def test_b3_prefetch_investigation_is_logged_like_the_tool_loop(fake_paypal, fake_llm, monkeypatch):
+    monkeypatch.setenv("INVESTIGATOR_MODE", "prefetch")
+    scenario_b_case(fake_paypal)
+    writes_before = len(fake_paypal.write_calls)
+
+    report = investigator.investigate(CASE)
+
+    assert report.mode == "prefetch" and report.recommended_action == "RECONCILE_MARK_PAID"
+    assert len(fake_paypal.write_calls) == writes_before
+    tool_events = _events("INVESTIGATION_TOOL_CALL")
+    assert [json.loads(e["payload_json"])["tool"] for e in tool_events] == PRD_TOOLS
+    assert len(_events("INVESTIGATION_REPORTED")) == 1
+    assert _case_row()["state"] == "INVESTIGATED"

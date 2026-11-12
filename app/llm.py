@@ -23,7 +23,10 @@ TEMPERATURE = 0  # PRD 4.1
 TRANSIENT_STATUS = frozenset({429, 500, 502, 503, 504})
 MAX_ATTEMPTS = 3
 RETRY_DELAYS_S = (1.0, 2.0)  # before attempts 2 and 3
-MIN_ATTEMPT_S = 5.0          # no retry unless this much budget is left after the delay
+# Gemini rejects a request deadline under 10 s with 400 INVALID_ARGUMENT, so every
+# call gets at least this much, and a retry starts only if a full one still fits.
+MIN_DEADLINE_S = 10.0
+MIN_ATTEMPT_S = MIN_DEADLINE_S
 
 
 class LLMError(Exception):
@@ -210,7 +213,7 @@ class _Gemini:
         remaining = self.deadline - time.monotonic()
         if remaining <= 0:
             raise TimeoutError("time budget used up before the model call")
-        return self.types.HttpOptions(timeout=int(remaining * 1000),
+        return self.types.HttpOptions(timeout=int(max(MIN_DEADLINE_S, remaining) * 1000),
                                       retry_options=self.types.HttpRetryOptions(attempts=1))
 
     def generate(self, contents, **config):

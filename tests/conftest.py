@@ -21,6 +21,14 @@ def tier1_env(tmp_path, monkeypatch):
 
 
 @pytest.fixture
+def fake_paypal():
+    """A fresh FakePayPal, wired in as the PayPal seam for PAYPAL_MODE=fake."""
+    from app.paypal.fake import reset_fake
+
+    return reset_fake()
+
+
+@pytest.fixture
 def approve():
     return {"approved_by": "ops-lead", "confirm": True}
 
